@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Kommandozeile fuer nopaper; als root wird automatisch als Dienstbenutzer ausgefuehrt.
+#
+#   nopaper check                       Standard-Instanz (/etc/nopaper/config.json, /srv/nopaper)
+#   nopaper --mandant kanzlei check     Mandant (/etc/nopaper-mandanten/kanzlei, /srv/nopaper-kanzlei)
+#
+# Testlauf ohne paperless:  nopaper test /pfad/zu/musterbelegen/
+#   Dateien/Ordner als Argument werden in den Testeingang der Instanz kopiert.
+set -euo pipefail
+PY=(/usr/bin/python3 -I /opt/nopaper/nopaper.py)
+BENUTZER=nopaper
+BASIS=/srv/nopaper
+
+if [[ "${1:-}" == "--mandant" ]]; then
+  M="${2:-}"
+  [[ "$M" =~ ^[a-z][a-z0-9]{1,14}$ ]] || { echo "Mandantenname: 2-15 Zeichen, a-z und 0-9, Buchstabe zuerst" >&2; exit 2; }
+  [[ -e "/srv/nopaper-$M" ]] || { echo "Mandant '$M' gibt es nicht (nopaper-mandant liste)" >&2; exit 2; }
+  PY+=(--config "/etc/nopaper-mandanten/$M/config.json")
+  BENUTZER="nopaper-$M"
+  BASIS="/srv/nopaper-$M"
+  shift 2
+fi
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  exec "${PY[@]}" "$@"
+fi
+
+if [[ "${1:-}" == "test" ]]; then
+  shift
+  opts=()
+  ein="$BASIS/test/eingang"
+  install -d -m 0750 -o "$BENUTZER" -g "$BENUTZER" "$BASIS/test" "$ein" "$BASIS/test/ergebnis"
+  kopiert=0
+  for a in "$@"; do
+    if [[ -f "$a" ]]; then
+      install -m 0640 -o "$BENUTZER" -g "$BENUTZER" "$a" "$ein/"; kopiert=$((kopiert + 1))
+    elif [[ -d "$a" ]]; then
+      while IFS= read -r -d '' f; do
+        install -m 0640 -o "$BENUTZER" -g "$BENUTZER" "$f" "$ein/"; kopiert=$((kopiert + 1))
+      done < <(find "$a" -maxdepth 1 -type f \( -iname '*.pdf' -o -iname '*.soll.json' \) -print0)
+    else
+      opts+=("$a")
+    fi
+  done
+  (( kopiert > 0 )) && echo "$kopiert Datei(en) nach $ein kopiert."
+  exec runuser -u "$BENUTZER" -- "${PY[@]}" test "${opts[@]}"
+fi
+
+exec runuser -u "$BENUTZER" -- "${PY[@]}" "$@"

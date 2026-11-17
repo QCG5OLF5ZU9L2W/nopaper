@@ -1,0 +1,78 @@
+{
+  "paperless": {
+    "url": "https://paperless.beispiel.intern",
+    "token_datei": "/etc/nopaper/paperless.token",
+    "ca_datei": null
+  },
+  "eingang": {
+    "rechnungen": "/srv/nopaper/eingang/rechnungen",
+    "dokumente": "/srv/nopaper/eingang/dokumente",
+    "fehler": "/srv/nopaper/fehler"
+  },
+  "ausgang": {
+    "rechnungsdaten": "/srv/nopaper/ausgang/rechnungsdaten"
+  },
+  "tags": {
+    "rechnung": [
+      "Rechnung",
+      "Eingangsrechnung"
+    ],
+    "dokument": [
+      "Scan"
+    ],
+    "pruefen": "nopaper prüfen",
+    "ausloeser_nachbearbeitung": "nopaper Rechnung",
+    "ausloeser_text": "totext"
+  },
+  "kategorie_tags": {
+    "bewirtung": [
+      "Bewirtung"
+    ],
+    "kassenbon": [
+      "Kassenbon"
+    ],
+    "versicherung": [
+      "Versicherung"
+    ],
+    "behoerde": [
+      "Behörde"
+    ]
+  },
+  "felder": {
+    "belegart": "Erkannt: Belegart",
+    "rechnungsnummer": "Erkannt: Rechnungsnummer",
+    "rechnungsdatum": "Erkannt: Rechnungsdatum",
+    "rechnungssteller": "Erkannt: Rechnungssteller",
+    "brutto": "Erkannt: Betrag brutto",
+    "netto": "Erkannt: Betrag netto",
+    "steuer_hoch": "Erkannt: Steuer_High",
+    "steuer_niedrig": "Erkannt: Steuer_Low",
+    "zahlbetrag": "Erkannt: Zahlbetrag",
+    "skonto": "Erkannt: Skonto",
+    "iban": "IBAN",
+    "faelligkeit": "Zahlungsziel",
+    "verwendungszweck": "Erkannt: Verwendungszweck"
+  },
+  "empfaenger": "Muster GmbH",
+  "dokumentrechte": {
+    "besitzer": null,
+    "ansehen_gruppen": [],
+    "bearbeiten_gruppen": [],
+    "ansehen_benutzer": [],
+    "bearbeiten_benutzer": []
+  },
+  "modelle": {
+    "text": "qwen3.5:9b",
+    "bild": "qwen3-vl:8b-instruct",
+    "glaettung": "qwen3.5:4b",
+    "ollama_url": "http://127.0.0.1:11434",
+    "kontext": 8192,
+    "timeout_s": 1800
+  },
+  "ocr_sprache": "deu",
+  "abfrage_intervall_s": 120,
+  "eingang_ruhezeit_s": 15,
+  "max_versuche": 5,
+  "sidecar_bei_pruefen": true,
+  "titel_rechnung": "{datum} {lieferant} {betrag}"
+}

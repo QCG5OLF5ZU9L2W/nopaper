@@ -1,0 +1,49 @@
+[Unit]
+Description=nopaper – Scan-Vorverarbeitung fuer paperless-ngx (lokale OCR + KI)
+After=network-online.target ollama.service
+Wants=network-online.target ollama.service
+
+[Service]
+Type=simple
+User=nopaper
+Group=nopaper
+Environment=HOME=/srv/nopaper/zustand
+Environment=XDG_CACHE_HOME=/srv/nopaper/zustand/cache
+Environment=OMP_THREAD_LIMIT=1
+ExecStart=/usr/bin/python3 -I /opt/nopaper/nopaper.py run
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=60
+UMask=0027
+Nice=10
+
+# Netz: localhost (Ollama) + paperless-Host. Die paperless-Adresse(n) schreibt
+# nopaper-aktivieren nach /etc/systemd/system/nopaper.service.d/10-paperless.conf
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# Dateisystem: schreiben nur unter /srv/nopaper
+ProtectSystem=strict
+ReadWritePaths=/srv/nopaper
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Haertung
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

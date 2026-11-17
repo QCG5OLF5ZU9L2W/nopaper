@@ -1,0 +1,360 @@
+# AGENTS.md – nopaper
+
+Diese Datei hält fest, **was** gebaut wird und **welche Entscheidungen bereits gefallen sind**.
+Wer an diesem Projekt arbeitet (Mensch oder Coding-Agent), hält sich daran. Abweichungen nur nach
+Rücksprache mit dem Projektverantwortlichen (zugleich Datenschutzbeauftragter).
+
+Stand: 2026-11-16 (Version 1.4.10; Entscheidungen E34, E37, E39 für 1.5, noch nicht gebaut; E40–E44 in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9 gebaut; E54 in 1.4.10 gebaut; E51–E53, E55 entschieden, noch nicht gebaut)
+
+---
+
+## 1. Ziel
+
+`nopaper` ist eine Vorverarbeitungs-VM zwischen Scanner und einem **bestehenden paperless-ngx**.
+
+- **Rechnungen** werden erkannt, ihre Kopfdaten ausgelesen und geprüft. Sie werden mit einem festen
+  Tag-Set in paperless angelegt und bekommen einen **Sidecar (CII-XML)** mit paperless-Dokument-ID und
+  SHA-256. Die Rechnungsdaten kommen zusätzlich in **benutzerdefinierte Felder** in paperless.
+- **Alle anderen Scans** werden in paperless angelegt und bekommen einen **KI-geprüften, geglätteten
+  Volltext**.
+
+## 2. Rahmenbedingungen (nicht verhandelbar)
+
+| Punkt | Vorgabe |
+|---|---|
+| Daten | Enthält Daten nach **Art. 9 DSGVO** ⇒ Verarbeitung **ausschließlich lokal**. Kein Cloud-Dienst, keine externe API, keine Telemetrie. |
+| Hardware | Debian-VM (12/13, amd64), **nur CPU, keine GPU**. Richtwert 8 vCPU, 16–24 GB RAM. |
+| Menge | **max. ca. 50 Dokumente pro Tag** |
+| paperless | **existiert bereits** und wird nicht von nopaper installiert. Zugriff nur über die REST-API (HTTPS). |
+| Netz | nopaper spricht nur mit localhost (Ollama) und dem paperless-Host. Internet nur während der Installation. |
+
+## 3. Architektur
+
+```
+Scanner
+  ├─► eingang/rechnungen/   (Scanprofil "Rechnung")
+  └─► eingang/dokumente/    (Scanprofil "Dokument")
+            │
+            ▼
+       nopaper-VM
+         1. Datei vollständig? (Größe stabil) → SHA-256 des Originals
+         2. OCR lokal (ocrmypdf/Tesseract, deu) → nur Text, PDF wird NICHT hochgeladen
+         3. Textmodell (Ollama): Einordnung Rechnung ja/nein
+         4. Textmodell: Glättung des OCR-Textes (mit Ziffern-Invariante, s. 5.4)
+         5. Bei Rechnung: Kopfdaten auslesen + Prüfung (s. 7)
+            Prüfung gescheitert → Rückfall Bildmodell auf Seite 1, erneut prüfen
+         6. Upload des UNVERÄNDERTEN Scanner-Originals an paperless (post_document, mit Tags)
+         7. Task abfragen → paperless-Dokument-ID
+         8. Prüfen: MD5 aus paperless-Metadaten == MD5 des Originals
+         9. content (Volltext) per API mit geglättetem Text überschreiben
+        10. Bei Rechnung: benutzerdefinierte Felder setzen, Sidecar in ausgang/rechnungsdaten/
+        11. Eingangsdatei aufräumen (s. 6.3)
+            │
+            ▼
+       paperless-ngx (Archiv, Suche, Oberfläche)
+
+Zweiter Weg – Nachbearbeitung:
+   Dokument in paperless mit Auslöser-Tag ─► nopaper holt Original per API ─► Schritte 2–5, 8–10
+   ─► Rechnungs-Tag-Set setzen, Auslöser-Tag entfernen
+```
+
+## 4. Getroffene Entscheidungen
+
+| # | Entscheidung |
+|---|---|
+| E1 | Alles lokal, Sprachmodelle über **Ollama** auf `127.0.0.1`. |
+| E2 | **Keine GPU**: Das Textmodell arbeitet auf dem OCR-Text (Standard). Das Bildmodell ist **nur Rückfall** bei Rechnungen, deren Prüfung scheitert. |
+| E3 | Der Scanner liefert in **zwei Ordner** (Rechnung / Dokument). Der Ordner ist die erste Einordnung, die KI prüft dagegen. Der Ordner ist **nicht 100 % zuverlässig**. |
+| E4 | **Jede PDF-Datei ist genau ein Dokument.** Zusammengehörige Seiten liegen in einer Datei. Kein Trennen, keine Trennblätter, keine Barcodes. |
+| E5 | **Das Original des Scanners geht unverändert an paperless.** paperless macht seine eigene OCR und Archivfassung wie bisher. |
+| E6 | Der **KI-Text wird nur für den Volltext** (Feld `content`) verwendet und nicht in ein PDF geschrieben. |
+| E7 | Das **Tag-Set für Rechnungen ist vorerst statisch** und wird in der **JSON-Konfiguration** festgelegt. Ebenso: Tags für sonstige Dokumente, Prüf-Tag, Auslöser-Tag. |
+| E8 | **Bereits vorhandene Dokumente** in paperless, die Rechnungen sind, werden über einen **Auslöser-Tag** nachträglich verarbeitet. |
+| E9 | Die Rechnungsdaten kommen **zusätzlich in benutzerdefinierte Felder** in paperless. |
+| E10 | Sidecars werden in einen **Ausgangsordner** geschrieben und dort **als Batch abgeholt**. |
+| E11 | Konfiguration in **einer JSON-Datei**, die der Verantwortliche pflegt. Das API-Token liegt **in einer eigenen Datei** mit restriktiven Rechten. |
+| E12 | Der Rechnungsempfänger wird **nicht aus dem Beleg gelesen**, sondern aus der Konfiguration gesetzt (Datenminimierung). |
+| E13 | Es werden **keine Rechnungspositionen** ausgelesen, denn dort stünden die Art.-9-Inhalte. |
+| E14 | **Modelle** (Stand 11/2026): Text `qwen3.5:9b`, Bild-Rückfall `qwen3-vl:8b-instruct`. Den **Denkmodus abschalten** (`think: false`). Ollama lädt immer nur ein Modell (`OLLAMA_MAX_LOADED_MODELS=1`). Vor dem Produktivbetrieb ein Vergleich mit 20–30 Musterbelegen. |
+| E15 | Standardwerte in Version 1.0 (über die Konfiguration änderbar): In den Batch-Ordner kommen **nur XML-Dateien**. nopaper **behält keine eigene Kopie** der Sidecars, die Abholung löscht. Der Rechnungssteller wird **kein Korrespondent**, sondern ein Feld. Die Eingangsdatei wird nach bestätigtem Upload **gelöscht**. |
+| E17 | **Einordnung und Rechnungsdaten in einem Modellaufruf** (spart auf CPU ca. 40 s pro Dokument). Kategorien: `rechnung`, `gutschrift`, `kassenbon`, `bewirtung`, `versicherung`, `behoerde` (rechnungsartig) sowie `mahnung`, `bestellbestaetigung`, `buchungsbestaetigung`, `lieferschein`, `brief`, `sonstiges`. Zusätzliche Tags je Kategorie über `kategorie_tags`. |
+| E18 | **Digitale PDFs** (echte Textebene, keine seitenfüllenden Scanbilder) werden nicht neu erkannt, sondern ihre Textebene wird genutzt. Scans: ocrmypdf, danach Text **mit Layout** (`pdftotext -layout`), damit Bezeichnung und Wert in einer Zeile bleiben. |
+| E19 | **Müllzeilen** (Handschrift, Flecken) und überwiegend unlesbare Seiten werden vor dem Modellaufruf entfernt. Der Volltext für paperless bleibt vollständig. |
+| E20 | **Glättung zeilenweise:** Ändert das Modell Ziffern, werden nur die betroffenen Zeilen roh gelassen. Für die Glättung kann ein eigenes, kleineres Modell gesetzt werden (`modelle.glaettung`). |
+| E21 | **Rechnerische Reparatur:** Ist die USt-Aufschlüsselung in sich stimmig und ergibt exakt den Bruttobetrag, werden Netto- und Steuersumme daraus übernommen (Hinweis `SUMMEN_AUS_AUFSCHLUESSELUNG`). Sonst wird nie repariert. |
+| E22 | **Regeln je Kategorie:** Kleinbetrag ≤ 250 € (§ 33 UStDV): keine Rechnungsnummer, kein Empfänger und keine Steuernummer erforderlich. Versicherung/Behörde: keine Steuernummer, Referenz ersetzt die Rechnungsnummer. Rechnungssteller außerhalb der EU: keine deutsche Steuer-ID. |
+| E23 | **Kein `--clean` (unpaper) bei ocrmypdf.** Auf Thermobons hat es dünne Striche gelöscht („68,00“ → „9,0“, „0,43“ → „0,49“). |
+| E24 | **Zweite Lesung:** Sind Prüfregeln rot, wird ein Scan ein zweites Mal unabhängig erkannt (Graustufen, 300 dpi, Tesseract psm 6). Beide Texte zusammen gelten als Beleg für die Verankerung (Hinweis `ZWEITE_LESUNG`). Erst danach kommt der Bild-Rückfall. |
+| E25 | **Weitere rechnerische Reparaturen** (nur in sich stimmig und belegt): Brutto aus der Aufschlüsselung, wenn deren Summe im Text steht und der Modellwert nicht. Steuersatz 7/19 % aus Basis und Steuer. Nullsatz ohne Steuer bei Versicherung/Behörde. Befreiungsgrund, der nicht im Text steht, wird durch den Standard der Kategorie ersetzt. Steuernummer mit falschem Format (z. B. IK-Nummer) und „Rechnungsnummern“, die eine Steuernummer sind, werden verworfen. |
+| E26 | **Keine Glättung digitaler PDFs:** Deren Textebene ist fehlerfrei. Das spart 2–4 Minuten pro Dokument. |
+| E27 | Das Feld `sicherheit` entfällt. Das Modell hat es nicht sinnvoll befüllt (0 oder 1). |
+| E28 | **Austauschbarer Extraktor:** `modelle.extraktor` = `standard` (qwen mit JSON-Schema) oder `nuextract3` (numind/nuextract3, Apache-2.0, 4B, Ollama-Rollen `template`/`instructions`). NuExtract liest wahlweise den OCR-Text oder direkt die ersten Seitenbilder (170 dpi). Prüfregeln, Reparaturen und Verankerung sind für alle Extraktoren gleich. Die Verankerung prüft auch beim Bild-Modus gegen den OCR-Text (inkl. zweiter Lesung). |
+| E29 | Weitere Modelle lädt `nopaper-modell-laden <modell>`: Netzsperre kurz aufheben, laden, Sperre sicher wieder setzen. |
+| E30 | **NuExtract im Bild-Modus bekommt bei langen Dokumenten die ersten Seiten plus die letzte** (Summenseite), standardmäßig bis 3 Seiten (`modelle.nuextract_seiten`). Anlass: mehrseitige Rechnung, bei der der Seitenübertrag als Brutto gelesen wurde. |
+| E31 | **Regel `BRUTTO_IST_ZWISCHENSUMME`:** Steht der Bruttobetrag nur in Zeilen mit „Übertrag“, „Zwischensumme“, „Warenwert“ o. ä., wird geprüft. |
+| E32 | **Versicherung mit Versicherungsteuer:** Steht „Versicherungsteuer“ im Text, setzt nopaper Nullsatz, Steuer 0 und Netto = Brutto (§ 4 Nr. 10 UStG). Hinweis `VERSICHERUNGSTEUER_KORRIGIERT`. |
+| E33 | **Rechnungssteller bei Agenturgeschäften:** Wird im Namen und für Rechnung eines Dritten verkauft (Tankstellen, Post), ist dieser Dritte der Rechnungssteller (z. B. die Mineralölgesellschaft statt des Tankstellenbetreibers). So entscheidet auch NuExtract. Die Soll-Werte wurden entsprechend korrigiert. |
+| E34 | **Anbindung an die Buchhaltung Aequa über Paperless und über Korrekturdateien** (Aequa F55, F66–F69; korrigiert). Keine direkte Verbindung, keine API-Aufrufe, keine Abhängigkeit in beide Richtungen. nopaper → Aequa: Erkannt-Felder und Sidecar. Aequa → nopaper: Korrekturdateien in einem Ordner (E39). |
+| E35 | **Feldnamen mit Präfix „Erkannt: “**: Alle Felder, die nopaper in Paperless schreibt, tragen dieses Präfix (z. B. „Erkannt: Rechnungsdatum“). Die Buchungsfelder von Aequa (F49, `Steuer` nach F66) liest nopaper nur und beschreibt sie nie. |
+| E36 | **Sidecars gehen sofort in den Abholordner**, auch bei Prüfstatus „prüfen“. Geprüft wird durch die Buchung in Aequa; eine Freigabe in Paperless entfällt. |
+| E37 | **Lernen aus gebuchten Belegen** (korrigiert; Quelle ist jetzt E39 statt eines Feldvergleichs in Paperless): Aus den Korrekturdateien entstehen (1) die Trefferquote im Echtbetrieb, (2) Lieferantenprofile (Name, Steuer-ID, IBAN; Warnung bei IBAN-Wechsel), (3) Lernbeispiele aus Kopftext plus geprüften Werten, die NuExtract/qwen bei weiteren Belegen desselben Lieferanten als Beispiel mitbekommen. Nur Kopfdaten, keine Positionen. Eine eigene Pseudonymisierung durch nopaper entfällt im internen Betrieb (die Platzhalter für Praxisdaten setzt Aequa, F69 Nr. 8); sie ist erst wieder nötig, falls Trainingsdaten das Haus verlassen sollen – das ist nicht vorgesehen. Verschwindet eine Korrekturdatei, werden Beispiel und daraus abgeleitete Profilwerte zurückgezogen. Die Lernbeispiele sind zugleich der Datensatz für ein späteres Adapter-Training (Punkt 12). |
+| E38 | **nopaper ist buchhaltungsneutral.** Es erkennt **Belegangaben** – was auf dem Beleg steht – immer vollständig und unabhängig davon, wer den Beleg später wie verwendet: Steueraufteilung, Steuer-IDs, Zahlungsart, gegebener Betrag und Rückgeld, Fälligkeit, Bankverbindung. Es trifft **nie** steuerliche oder buchhalterische Entscheidungen (Vorsteuerabzug, Konto, Periode, Abflusszeitpunkt); das ist Sache der Buchhaltung. Keine Einstellung und kein Lernsignal darf die Erkennung von Belegangaben abschalten oder nach Mandantenart verändern. Prüfregeln, die beschreiben, was ein Beleg ausweist (z. B. „Versicherungsteuer ist keine Umsatzsteuer“, Kleinbetragsgrenze als Pflichtangaben-Prüfung), sind Belegprüfung und bleiben. |
+| E39 | **Korrekturordner als Lernquelle und Testset** (Aequa F69): nopaper liest die Dateien `<uuid>.json` (Schema `aequa-korrektur/1`) aus einem konfigurierbaren Ordner – **nur lesend**, ohne Rückfrage in Paperless oder Aequa und ohne etwas zurückzuschreiben. Regeln: (1) `gebucht` enthält nur von einem Menschen geprüfte Belegangaben. (2) **Fehlendes Feld = ungeprüft** → wird beim Lernen und Messen ignoriert; **`null` = steht nicht auf dem Beleg** → nopaper sollte hier nichts erkennen. Fehlt z. B. `steuer`, weil brutto gebucht wurde, lernt nopaper daraus nichts über die Steuer und erkennt sie weiter (E38). (3) Die Datei ist eine Obermenge der `*.soll.json`; `nopaper test` kann den Ordner direkt als Testset verwenden. Alles, was nach dem letzten Regel- oder Modellstand gebucht wurde, ist der **Holdout-Test**. (4) Verschwundene Datei = zurückgezogenes Beispiel (Storno, Neubuchung, Fristablauf); nopaper hält daraus abgeleitete Daten nicht länger vor als die Datei selbst. (5) Unbekannte Schema-Version oder unlesbare Datei: überspringen und melden, nie raten. (6) Die Dateien sind interne, nicht anonyme Daten: gleicher Schutz wie die Belege, kein Inhalt in Logs. |
+| E40 | **nopaper legt in paperless nichts an und es werden dort keine Skripte ausgeführt.** Tags, Felder und der API-Benutzer werden vom Verantwortlichen von Hand angelegt; das Token trägt er selbst ein. Fehlendes meldet `nopaper check` (`TAG_FEHLT`, `FELD_FEHLT`), der Dienst startet dann nicht. (Ersetzt die frühere Aussage, nopaper lege fehlende Tags/Felder an.) |
+| E41 | **Prüfstatus in paperless ist der Posteingangs-Tag**, den paperless selbst setzt: Ist er entfernt, gilt der Beleg als gesichtet. Das Feld `pruefstatus` wird nicht geschrieben; `tags.pruefen` ist optional. Der Prüfstatus steht weiterhin im Sidecar. |
+| E42 | **Felder im paperless des Verantwortlichen:** `Erkannt: Belegart`, `Erkannt: Rechnungsnummer`, `Erkannt: Rechnungsdatum`, `Erkannt: Rechnungssteller`, `Erkannt: Betrag brutto`, `Erkannt: Betrag netto`, `Erkannt: Steuer_High`, `Erkannt: Steuer_Low`, `Erkannt: Zahlbetrag`, `Erkannt: Skonto`; dazu auf ausdrücklichen Wunsch die vorhandenen Felder **`IBAN`** und **`Zahlungsziel`** ohne Präfix (Ausnahme von E35). Bei der Nachbearbeitung überschreibt nopaper diese beiden Felder. |
+| E43 | **Steuer nach Klasse:** `steuer_hoch` = Summe der Steuerbeträge zu Sätzen ab 10 %, `steuer_niedrig` = zu Sätzen über 0 und unter 10 %. Weist der Beleg eine Klasse nicht aus, bleibt das Feld leer (nicht 0). |
+| E44 | **Zahlungsangaben sind Belegangaben** (E38): Rückgeld (gegeben > Endbetrag → bezahlt = Endbetrag, offen 0); Kassenbon/Bewirtung mit Zahlungsvermerk gilt als bezahlt; Zahlungsziel aus Datum oder aus Frist in Tagen ab Rechnungsdatum; **Skonto** je Stufe `satz:frist:betrag` (Frist als Datum, Stufen mit `;`), nur wenn „Skonto“ und der Satz wörtlich im Text stehen; der Skontobetrag wird nie selbst berechnet. Im Sidecar als `#SKONTO#TAGE=…#PROZENT=…#` in den Zahlungsbedingungen. |
+| E45 | **paperless-ngx 2.x und 3.x werden unterstützt.** Das paperless des Verantwortlichen läuft mit dem Aufgabenformat von 3.x (`status` klein geschrieben, `related_document_ids`, `result_data`, `task_type`). Regeln: Aufgaben nur über die eigene `task_id` zuordnen, nie die erste Aufgabe der Antwort nehmen; unbekannte Antworten führen nach kurzer Frist zu einem klaren Fehlercode, nie zu stummem Warten; `nopaper check` zeigt das erkannte Format. Der Fake-Server der Tests muss beide Formate abdecken. Die Prüfsummen `original_checksum`/`archive_checksum` werden je nach Länge als MD5 (32) oder SHA-256 (64) verglichen (1.4.3). Noch offen: echtes Beispiel einer Import-Aufgabe (Erfolg und Duplikat) aus 3.x zur Bestätigung; Folge für Aequa F10 (dort ist MD5 als Abgleichwert festgeschrieben) klären. |
+| E46 | **Widerspruch zwischen Bildmodell und Texterkennung wird nicht stillschweigend entschieden.** Weicht eine Belegnummer des Bildmodells in genau einer Ziffer von der Nummer ab, die im OCR-Text hinter einer Belegbezeichnung steht, bleibt der Wert des Bildmodells im Feld (`RECHNUNGSNUMMER_ABWEICHEND`) und der Beleg geht in die Prüfung. Anlass: erster Echtlauf gegen paperless (2026-11-16), Tankstellen-Bon, Bild und OCR in der ersten Ziffer verschieden; bis 1.4.3 wurde die Nummer verworfen. Lehre für Soll-Werte: nie aus dem OCR-Text übernehmen, nur vom Papier. |
+| E47 | **Der Dienst macht keine DNS-Abfragen.** Die Netzsperre (`IPAddressDeny=any`) lässt nur localhost und die IP(s) des paperless-Hosts zu; ein DNS-Server wird bewusst nicht freigegeben (kein Nebenkanal). `nopaper-aktivieren` löst den Namen einmal auf und trägt ihn fest in `/etc/hosts` ein. Bei IP-Wechsel von paperless erneut ausführen. Anlass: erster Start als Dienst (2026-11-16), `URLError` trotz bestandenem `nopaper check`, weil `check` außerhalb der Sperre läuft. Offen: `check` sollte die Erreichbarkeit unter denselben Bedingungen wie der Dienst prüfen. |
+| E48 | **Titel von Rechnungen in paperless:** `Rechnungsdatum Lieferant Betrag` (Datum JJJJ-MM-TT zum Sortieren, Betrag brutto mit Komma und Währung), z. B. `2026-11-05 Muster Tankstelle 60,58 EUR`. **Schon beim Upload** wird die Datei unter diesem Namen (`….pdf`) übergeben, weil der Scanner nur nichtssagende Namen liefert (`img1.pdf`) und paperless den Dateinamen als Titel und Originaldateinamen übernimmt (1.4.7). Vorlage in `titel_rechnung`; fehlende Teile entfallen; ohne Datum und Lieferant bleibt der bisherige Titel. Gilt für Eingang und Nachbearbeitung (dort wird ein vorhandener Titel überschrieben). Den Dateinamen auf der Platte bestimmt paperless selbst aus seinem Dateinamenformat. Dokumente, die keine Rechnung sind, behalten den Titel. |
+| E49 | **Dritter Weg: Volltext vorhandener Dokumente erneuern** (Tag `tags.ausloeser_text`, z. B. `totext`). nopaper holt das Original, erkennt und glättet den Text und schreibt **ausschließlich `content`** zurück; danach entfernt es den Tag. Keine Felder, kein Titel, keine weiteren Tags, kein Sidecar, Besitzer unverändert. **Schutzregel:** Ersetzt wird nur, wenn der neue Text nicht schlechter ist (lesbare Zeichen ≥ 90 % des alten, Anteil lesbarer Zeichen höchstens 3 Punkte niedriger); sonst bleibt der alte Text und nur der Tag wird entfernt. Das Maß kommt ohne Wörterbuch aus und erkennt Verlust und Müll, nicht aber berichtigte Tippfehler – deshalb „nicht schlechter“ statt „besser“. Trägt ein Dokument beide Auslöser, läuft nur der Rechnungsweg. Grenze: gleiche Erkennungssoftware wie paperless (Tesseract); ein Lesen der Seite durch ein Bildmodell ist erst mit GPU sinnvoll und nicht entschieden. |
+| E50 | **Verwendungszweck** (Feld `Erkannt: Verwendungszweck`, Schlüssel `verwendungszweck`): das, was laut Beleg bei der Überweisung anzugeben ist (Kassenzeichen, Aktenzeichen, Vertrags-, Kunden- oder Rechnungsnummer). **Harte Regel:** nur Werte, die wörtlich im OCR-Text stehen; ein abweichender Modellwert wird verworfen, nie korrigiert. Ersatzweise ein eindeutig bezeichnetes Kassenzeichen aus dem Text. Lieber leer als falsch, weil eine Zahlung mit falschem Verwendungszweck nicht zugeordnet werden kann. |
+| E51 | **Lernen in zwei Schichten** (entschieden 2026-11-16, Umsetzung mit dem Lernen aus Korrekturdateien, E37/E39). (1) **Gemeinsame Schicht – Lieferantenwissen:** Identität des Lieferanten (Name, USt-IdNr., Steuernummer, Anschrift) und **Layoutregeln** (z. B. „Belegnummer hinter ‚Beleg-Nr.‘, Format 000/000/00000“, „Endbetrag im letzten Summenblock“, „Verkäufer ist der Pächter“). Nur strukturierte, abgeleitete Angaben, **kein Satz aus einem Beleg**. Gilt für alle Mandanten einer Maschine und ist die Grundlage einer möglichen offenen Sammlung. (2) **Private Schicht je Mandant:** Belegtexte mit geprüften Werten (Lernbeispiele), Kundennummern, eigene Daten. Verlässt den Mandanten nie und wird nie in der Verarbeitung eines anderen Mandanten verwendet (Durchsickern über Beispiele im Prompt; Berufsgeheimnis). Regeln: Einträge entstehen nur aus gebuchten Belegen; eine Layoutregel gilt erst nach mehreren bestätigenden Buchungen; **Einzelunternehmer** (natürliche Personen) bleiben standardmäßig in der privaten Schicht; Profile liefern **nie Werte**, nur Hinweise, wo zu lesen ist – die Verankerung im aktuellen Beleg gilt unverändert. Bestätigte Bankverbindungen werden je Maschine geführt (Warnung bei Abweichung) und nie nach außen gegeben (E52). |
+| E52 | **Rückweg in den offenen Schwarm: geteilt werden Belegbeschreibungen, keine Inhalte** (entschieden 2026-11-16, noch nicht gebaut). Eine Belegbeschreibung sagt, **wie** ein Belegtyp aufgebaut ist und **wo** die Angaben üblicherweise stehen: Bezeichnungen („Beleg-Nr.“, „Gesamtbetrag“), Lage (Kopf, Summenblock, letzte Seite), **typische Positionen als relative Abstände** (Lage des Werts zu seiner Bezeichnung: rechts daneben, darunter, in welcher Spalte, Abstand in Anteilen der Seitenbreite bzw. Zeilenhöhe; Lage von Blöcken zueinander; bei Bons relativ zu Ankerwörtern statt zur Seite, weil die Länge schwankt; jeweils mit Toleranz), Formatmuster (z. B. `000/000/00000`, nie eine echte Nummer), Aufbau der Steuerübersicht (Spalten, Kennbuchstaben), Belegart, typische Fallen (Übertrag auf Seite 1, „gegeben/Rückgabe“, Verkäufer ist der Pächter). **Nie enthalten:** Werte irgendeiner Art (Beträge, Nummern, Daten, Bankverbindungen), Namen und Anschriften von Empfängern, Text aus Belegen, Leistungs- oder Positionsinhalte. Damit entfällt auch jede Weitergabe von IBANs. Regeln: (1) Beschreibungen entstehen lokal aus gebuchten Belegen und werden als lesbare Dateien exportiert; **kein automatischer Versand**, ein Mensch prüft und reicht ein. (2) Einreichung und Pflege über Git (jeder Beitrag sichtbar und prüfbar), Aufnahme erst nach Bestätigung durch mehrere unabhängige Einsender. (3) Abholung als signierte Datei mit dem Update oder über einen bewussten Abruf; die Netzsperre der VM bleibt. (4) Lokale Beschreibungen gehen vor. (5) Eine Beschreibung liefert nie Werte, nur Hinweise, wo zu lesen ist; Verankerung und Prüfregeln gelten unverändert – eine falsche Beschreibung führt zu einem leeren oder markierten Feld, nicht zu einem falschen Wert. (6) Kein Modell und kein Adapter wird geteilt (ein Modell gilt als weiterer Speicherort). (7) **Zuordnung über beides gemeinsam:** gedruckte Formularwörter (Fingerabdruck aus festen Bezeichnungen) **und** Firmenname bzw. USt-IdNr. des Lieferanten. Der Lieferant als Schlüssel nur bei juristischen Personen; Einzelunternehmer (z. B. Pächter) werden nie genannt, ihre Belege finden die Beschreibung allein über die Formularwörter. Stimmen beide Merkmale überein, gilt die Beschreibung als sicher zugeordnet; passt nur eines, wird sie als Hinweis mit geringerem Gewicht verwendet. (8) Voraussetzung in nopaper: Wortpositionen aus der Texterkennung (Tesseract-TSV bzw. Textebene mit Koordinaten); dieselbe Grundlage dient dem gezielten Nachlesen strittiger Felder als Bildausschnitt. |
+| E53 | **Veröffentlichung:** nopaper wird als freie Software auf **GitHub** veröffentlicht, Lizenz **GNU AGPL, Version 3 oder später** (`AGPL-3.0-or-later`, wie Aequa F52). Vorher: alle Spuren echter Belege aus Code, Tests und Dokumentation entfernen (Belegnummern, Steuernummern, Händlernamen aus Testläufen, Tag-Namen und Pfade des Verantwortlichen), saubere Historie ab dem ersten Commit, README für Außenstehende, Klarstellungen (Sidecar ist keine E-Rechnung; keine Prüfung ohne Mensch; bisher an einem paperless 3.x erprobt). Soll-Dateien und Testbelege bleiben außerhalb des Repositorys. |
+| E54 | **Mandanten: ein Dienst je Mandant, jeder Mandant hat sein eigenes paperless.** Je Mandant getrennt: Konfiguration, Token, paperless-Adresse, Eingang, Ausgang, Fehlerordner, Zustandsdaten, Systembenutzer, Netzfreigabe (nur zum eigenen paperless), Tags, Felder, Empfänger, Titelvorlage, private Lernschicht (E51). Gemeinsam: Programm und Ollama mit den Modellen. Die Trennung ist eine des Betriebssystems (eigener Benutzer je Dienst), nicht nur der Programmlogik. Bekannte Grenzen: gemeinsame Rechenzeit (ein Beleg nach dem anderen), der Administrator der Maschine sieht alle Mandanten. **Umsetzung (1.4.10):** `nopaper-mandant anlegen <name>` (Name 2–15 Zeichen, a–z und 0–9), Benutzer `nopaper-<name>`, Gruppen `nopaper-<name>-eingang`/`-abholung`, Bereich `/srv/nopaper-<name>`, Konfiguration `/etc/nopaper-mandanten/<name>/` (nur root und der Dienstbenutzer lesen), Dienstvorlage `nopaper@.service`, Bedienung `nopaper --mandant <name> …`, Start `nopaper-aktivieren <name>`. Die Standard-Instanz (`nopaper`, `/etc/nopaper`, `/srv/nopaper`) bleibt daneben bestehen. |
+| E55 | **Scanner-Anbindung über WebDAV mit HTTPS, Annahme durch nginx** (Debian-Paket) auf der nopaper-VM. SMB wird nicht angeboten (die Samba-Option im Installer ist mit 1.4.10 entfernt), FTPS ebenfalls nicht. nginx nimmt nur `PUT` an und schreibt die Datei erst nach vollständigem Empfang durch Umbenennen in den Eingang (keine halben Dateien). Je Mandant eigene Zugangsdaten und zwei Ziele (Rechnung, Dokument). Der Scanner darf nur ablegen, nicht lesen, auflisten oder löschen. Bezugsgerät: Epson DS-790WN (Zieltyp „SharePoint (WebDAV)“, HTTPS, Benutzer ≤ 30, Kennwort ≤ 20 Zeichen, Zertifikatsprüfung nur mit importiertem CA-Zertifikat, kein Portfeld). Offen: Wo TLS endet (vorgeschalteter Caddy oder die VM selbst) und welche WebDAV-Methoden das Gerät tatsächlich sendet – am Gerät zu prüfen. |
+| E16 | Neu hochgeladene Dokumente sollen nicht dem API-Benutzer gehören. Deshalb setzt nopaper `owner` und Rechte nach `dokumentrechte` in der Konfiguration. Standard: kein Besitzer, das entspricht dem Import über den Consume-Ordner von paperless. Bei vorhandenen Dokumenten (Nachbearbeitung) bleiben Besitzer und Rechte unverändert. |
+
+## 5. Verarbeitung im Detail
+
+### 5.1 Eingang
+- Eine Datei gilt als fertig, wenn ihre Größe über mindestens 10 s unverändert ist. Akzeptiert werden nur `.pdf` (ggf. später `.tif`/`.jpg`).
+- Der SHA-256 wird **sofort beim Eingang** über die Originaldatei berechnet. Diese Datei wird danach nie verändert.
+- Arbeitskopien (OCR-Ergebnis, Seitenbilder) entstehen nur in einem privaten temporären Verzeichnis und werden nach dem Durchlauf gelöscht.
+
+### 5.2 OCR
+- `ocrmypdf -l deu --force-ocr` (oder `--redo-ocr`) auf eine **Kopie**. Daraus wird der Text extrahiert (`pdftotext -layout`).
+- Die OCR-PDF dient nur der Texterkennung. Hochgeladen wird immer das Original (E5).
+
+### 5.3 Einordnung
+- Das Textmodell gibt `rechnung` / `gutschrift` / `keine_rechnung` und eine Sicherheit zurück (festes JSON-Schema).
+- Entscheidungstabelle:
+
+| Ordner | KI | Ergebnis |
+|---|---|---|
+| rechnungen | Rechnung | Rechnungsweg |
+| dokumente | keine Rechnung | Dokumentweg |
+| rechnungen | keine Rechnung | Dokumentweg **+ Prüf-Tag**, kein Sidecar |
+| dokumente | Rechnung | Dokumentweg **+ Prüf-Tag**, kein Sidecar |
+
+- Nach manueller Entscheidung setzt der Mensch in paperless den Auslöser-Tag, dann folgt der Nachbearbeitungsweg (E8).
+
+### 5.4 Glättung des Volltextes
+- Erlaubt: Erkennungsfehler korrigieren (z. B. „Rechnuug“ → „Rechnung“), Silbentrennung am Zeilenende auflösen, zerrissene Zeilen und Wörter zusammenfügen, offensichtlichen OCR-Müll entfernen.
+- Verboten: umformulieren, zusammenfassen, Inhalte weglassen oder ergänzen, übersetzen.
+- **Ziffern-Invariante (harte Regel):** Die Folge aller Ziffernfolgen (Beträge, Daten, Nummern, IBAN, PLZ) muss vor und nach der Glättung **identisch** sein. Bei Abweichung wird die Glättung **verworfen** und der rohe Tesseract-Text verwendet. Das wird protokolliert (nur als Code).
+- Zusätzliche Plausibilität: Die Textlänge nach der Glättung muss zwischen 80 % und 110 % der Rohfassung liegen, sonst wird verworfen.
+- Lange Dokumente seitenweise bzw. in Abschnitten glätten (Kontextfenster 8k).
+
+### 5.5 Rechnungsdaten
+- Festes JSON-Schema, `temperature 0`. Felder: Dokumenttyp, Rechnungsnummer, Rechnungs-, Leistungs- und Fälligkeitsdatum, Währung, Rechnungssteller (Name, Anschrift, Land, USt-IdNr., Steuernummer), IBAN, BIC, Verwendungszweck, Netto, Steuer, Brutto, Anzahlung, Zahlbetrag, USt-Aufschlüsselung (Satz, Basis, Steuer, Befreiungsgrund).
+- Die Prüfung erfolgt nach Abschnitt 7. Scheitert sie, folgt der **Rückfall auf das Bildmodell**: Seite 1 als Bild (ca. 150–200 dpi) an das Bildmodell, gleiches Schema, erneute Prüfung. Das bessere Ergebnis zählt. Bleibt die Prüfung rot, gilt `pruefstatus=pruefen` und das Dokument bekommt den Prüf-Tag.
+
+### 5.6 Übergabe an paperless
+- `POST /api/documents/post_document/` mit dem Original, den Tags (IDs aus der Konfiguration aufgelöst) und optional dem Titel.
+- `GET /api/tasks/?task_id=…` abfragen, bis der Status `SUCCESS` oder `FAILURE` ist. Bei Erfolg: `related_document` = Dokument-ID.
+- Wird ein Duplikat erkannt (paperless lehnt die Prüfsumme ab), kommt die Datei in den Fehlerordner mit dem Code `DUPLIKAT_PAPERLESS`.
+- `GET /api/documents/{id}/metadata/`: `original_checksum` (MD5) muss mit dem lokal berechneten MD5 übereinstimmen.
+- `PATCH /api/documents/{id}/`: `content` = geglätteter Text. Bei Rechnungen zusätzlich `custom_fields`.
+- Optional `sha256-archiv`: die Archivfassung per API streamen und hashen (nicht speichern).
+
+### 5.7 Nachbearbeitung vorhandener Dokumente (E8)
+- nopaper fragt die API in einem festen Takt nach Dokumenten mit dem Auslöser-Tag ab.
+- Das Original wird per `GET /api/documents/{id}/download/?original=true` geholt, nur in den temporären Arbeitsbereich.
+- Danach folgen die Schritte 5.2–5.5, das Setzen von Volltext, Feldern und Rechnungs-Tag-Set, das Schreiben des Sidecars und **das Entfernen des Auslöser-Tags**.
+- Eine Einordnung wird hier nicht gemacht, denn der Mensch hat bereits entschieden.
+
+## 6. Ausgang
+
+### 6.1 Sidecar
+- Dateiname: `<paperless-id, 7-stellig>.xml`, z. B. `0000042.xml`.
+- Wird **atomar** geschrieben (temporäre Datei mit Punkt-Präfix im selben Ordner, dann `rename`). Die Abholung sieht nur vollständige Dateien und muss Dateien mit Punkt-Präfix ignorieren.
+- Format: **UN/CEFACT CII D16B**, Profil **Factur-X/ZUGFeRD BASIC WL** (`urn:factur-x.eu:1p0:basicwl`). Das ist das EN-16931-Datenmodell ohne Positionen. Es ist ausdrücklich **keine E-Rechnung** im Sinne von § 14 UStG, sondern eine Buchungshilfe.
+- Herkunftsnachweis in `rsm:ExchangedDocument/ram:IncludedNote/ram:Content`. Erste Zeile `SCAN-SIDECAR/1.0`, danach Zeilen `schluessel=wert`:
+  `paperless-document-id`, `paperless-url`, `sha256-original`, `sha256-archiv`, `quelle` (`scanner`|`nachbearbeitung`), `extraktion-modell`, `extraktion-methode` (`text`|`bild`), `extraktion-software`, `extraktion-zeit`, `pruefstatus` (`ok`|`pruefen`), `pruefhinweise` (Codes, kommagetrennt), `hinweis`.
+- `sha256-original` ist der Hash der Scanner-Datei und damit des Originals in paperless.
+
+### 6.2 Benutzerdefinierte Felder in paperless
+- Zuordnung und Feldnamen stehen in der Konfiguration (`felder`). Die Felder müssen in paperless vorhanden sein (E40); nopaper legt nichts an.
+- Ein Feld, das in der Konfiguration fehlt, wird nicht geschrieben.
+
+### 6.3 Eingangsdateien nach der Verarbeitung
+- Nach **bestätigtem** Upload (ID erhalten **und** MD5 geprüft) wird die Eingangsdatei **gelöscht** (Vorschlag, siehe Abschnitt 12).
+- Bei Fehlern kommt die Datei nach `fehler/`, mit einer Begleitdatei `<name>.fehler.json` (nur Codes, keine Inhalte).
+
+## 7. Prüfregeln für Rechnungen
+
+| Code | Regel |
+|---|---|
+| `FEHLT_RECHNUNGSNUMMER`, `FEHLT_RECHNUNGSDATUM`, `FEHLT_BRUTTO`, `FEHLT_RECHNUNGSSTELLER`, `FEHLT_STEUERNUMMER_UND_USTID` | Pflichtangaben vorhanden |
+| `RECHNUNGSNUMMER_NICHT_IM_TEXT`, `BRUTTO_NICHT_IM_TEXT`, `IBAN_NICHT_IM_TEXT` | **Verankerung**: Der Wert muss wörtlich im OCR-Text stehen (Schutz gegen Halluzination) |
+| `SUMME_NETTO_STEUER_BRUTTO`, `SUMME_UST_BASIS`, `SUMME_UST_BETRAG`, `UST_SATZ_RECHNUNG` | Rechnerische Prüfung, Toleranz 0,02 |
+| `IBAN_PRUEFZIFFER`, `USTID_FORMAT`, `WAEHRUNG_FORMAT` | Formate |
+| `UST_BEFREIUNG_OHNE_GRUND` | 0 % nur mit Befreiungshinweis |
+| `DATUM_NICHT_IM_TEXT`, `DATUM_MEHRDEUTIG` | Rechnungsdatum steht nicht im Text (z. B. Eingangsstempel übernommen) bzw. nur als vertauschbares TT/MM-Datum |
+| `RECHNUNGSSTELLER_NICHT_IM_TEXT` | Name nicht einmal unscharf (≥ 60 %) im Text |
+| `RECHNUNGSNUMMER_FALSCHE_BEZEICHNUNG` | Nummer steht nur hinter „Kunden-“, „Auftrags-“, „Bestell-Nr.“ usw. |
+| `VERSICHERUNGSTEUER_ALS_UST` | Versicherungsteuer wurde als Umsatzsteuer übernommen |
+| `RECHNUNGSDATUM_IN_ZUKUNFT`, `FAELLIGKEIT_VOR_RECHNUNGSDATUM` | Datumsplausibilität |
+| `DUPLIKAT_VON_DOKUMENT_<id>` | Gleicher Absender und gleiche Rechnungsnummer; der Index speichert nur Hashes |
+| `EINORDNUNG_WIDERSPRUCH` | Ordner und KI sind uneins (5.3) |
+| `BRUTTO_AUS_AUFSCHLUESSELUNG`, `UST_SATZ_BERECHNET`, `UST_NULLSATZ_KORRIGIERT`, `BEFREIUNGSGRUND_ERSETZT`, `STEUERNUMMER_VERWORFEN`, `RECHNUNGSNUMMER_VERWORFEN`, `ZWEITE_LESUNG`, `GLAETTUNG_UEBERSPRUNGEN`, `UST_AUFSCHLUESSELUNG_BERECHNET`, `NETTO_BERECHNET`, `SUMMEN_AUS_AUFSCHLUESSELUNG`, `BILDMODELL_VERWENDET`, `GLAETTUNG_VERWORFEN`, `GLAETTUNG_TEILWEISE_n`, `EINORDNUNG_UEBERSTIMMT` | Nur Hinweise, keine Prüffehler |
+
+Ist mindestens ein Prüffehler gesetzt, gilt `pruefstatus=pruefen` und das Dokument bekommt den Prüf-Tag.
+
+## 8. Konfiguration
+
+Pfad: `/etc/nopaper/config.json` (root:nopaper, 0640). Token: `/etc/nopaper/paperless.token` (root:nopaper, 0640).
+Die Konfiguration wird **beim Start vollständig geprüft**. Bei Fehlern startet der Dienst nicht und meldet eine klare Fehlermeldung.
+
+```json
+{
+  "paperless": {
+    "url": "https://paperless.beispiel.intern",
+    "token_datei": "/etc/nopaper/paperless.token",
+    "ca_datei": null
+  },
+  "eingang": {
+    "rechnungen": "/srv/nopaper/eingang/rechnungen",
+    "dokumente": "/srv/nopaper/eingang/dokumente",
+    "fehler": "/srv/nopaper/fehler"
+  },
+  "ausgang": {
+    "rechnungsdaten": "/srv/nopaper/ausgang/rechnungsdaten"
+  },
+  "tags": {
+    "rechnung": ["Rechnung", "Eingangsrechnung", "Buchhaltung offen"],
+    "dokument": ["Scan"],
+    "pruefen": "nopaper prüfen",
+    "ausloeser_nachbearbeitung": "nopaper Rechnung"
+  },
+  "felder": {
+    "rechnungsnummer": "Rechnungsnummer",
+    "rechnungsdatum": "Rechnungsdatum",
+    "faelligkeit": "Fällig am",
+    "rechnungssteller": "Rechnungssteller",
+    "brutto": "Betrag brutto",
+    "netto": "Betrag netto",
+    "iban": "IBAN",
+    "pruefstatus": "Prüfstatus"
+  },
+  "empfaenger": "Muster GmbH",
+  "dokumentrechte": {
+    "besitzer": null,
+    "ansehen_gruppen": [],
+    "bearbeiten_gruppen": [],
+    "ansehen_benutzer": [],
+    "bearbeiten_benutzer": []
+  },
+  "modelle": {
+    "text": "qwen3.5:9b",
+    "bild": "qwen3-vl:8b-instruct",
+    "ollama_url": "http://127.0.0.1:11434",
+    "kontext": 8192,
+    "timeout_s": 1800
+  },
+  "ocr_sprache": "deu",
+  "abfrage_intervall_s": 120,
+  "eingang_ruhezeit_s": 15,
+  "max_versuche": 5,
+  "sidecar_bei_pruefen": true
+}
+```
+
+- `dokumentrechte`: Besitzer sowie Gruppen und Benutzer mit Ansehen- bzw. Bearbeiten-Recht für **neu hochgeladene** Dokumente (Namen wie in paperless). Standard: kein Besitzer.
+- `sidecar_bei_pruefen`: Sidecar auch bei `pruefstatus=pruefen` schreiben (Standard: ja). Die Abholung muss den Prüfstatus auswerten.
+
+- Tags müssen in paperless vorhanden sein (E40) und sollten die **Zuweisung „Keine“** haben, damit paperless sie nicht selbst auf andere Dokumente verteilt.
+- `paperless.url` muss `https://` sein. Ausnahme ist nur localhost.
+
+## 9. Sicherheit und Datenschutz – Pflichten für jede Implementierung
+
+- **Kein Netzverkehr** außer zu `127.0.0.1` (Ollama) und zum paperless-Host. Durchgesetzt per systemd `IPAddressDeny=any` mit `IPAddressAllow=localhost` und den IP(s) von paperless. Ollama ist auf `127.0.0.1` gebunden und nach dem Modell-Download gesperrt.
+- **TLS mit Zertifikatsprüfung**. TLS-Prüfung darf nie abgeschaltet werden. Eine interne CA wird über `ca_datei` angegeben.
+- **Protokolle nur mit Metadaten**: Dokument-ID, Dateiname des Eingangs, Status, Prüfcodes, Laufzeit. **Niemals** OCR-Text, Rechnungsdaten, Namen oder Beträge protokollieren, auch nicht im Debug-Modus oder in Exceptions.
+- **Keine dauerhaften Kopien** von Belegen oder Text auf nopaper. Temporäres nur im privaten Arbeitsverzeichnis (`PrivateTmp`), nach jedem Durchlauf löschen.
+- **Zustandsdaten** (z. B. SQLite) enthalten nur IDs, Hashes, Status und Versuchszähler.
+- **Least Privilege** in paperless: eigener API-Benutzer ohne Admin-Rechte, ohne Löschrecht, ohne Passwort-Login. Nötig sind nur Dokumente anlegen, lesen und ändern, Tags und benutzerdefinierte Felder lesen und anlegen. Objektrechte für Dokumente mit Besitzer kommen über einen paperless-Workflow.
+- **systemd-Härtung**: eigener Systembenutzer `nopaper`, `ProtectSystem=strict`, `ReadWritePaths` nur für `/srv/nopaper`, `NoNewPrivileges`, leeres `CapabilityBoundingSet`, `PrivateTmp`, `PrivateDevices`, umask 027.
+- **Tests und Entwicklung nur mit Musterbelegen.** Echte Rechnungen dürfen nie in Tests, Fixtures, Issues oder Chats auftauchen.
+
+## 10. Leistung (Richtwerte, CPU)
+
+| Schritt | Dauer |
+|---|---|
+| OCR Tesseract | ca. 5–15 s/Seite |
+| Einordnung + Glättung + Auslesen, 7B-Textmodell | ca. 2–4 min/Dokument |
+| Rückfall Bildmodell (nur Seite 1) | ca. 3–6 min |
+
+Bei 50 Dokumenten pro Tag sind das grob 2–3 h Rechenzeit. Die Verarbeitung läuft als Warteschlange, **immer nur ein Dokument gleichzeitig**, damit RAM und CPU nicht überlaufen.
+
+## 11. Konventionen für die Implementierung
+
+- **Python ≥ 3.11, nur Standardbibliothek.** Systemwerkzeuge über Debian-Pakete: `ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`. Kein `pip install` auf der Ziel-VM.
+- Ein Dienst `nopaper.service` mit einer Hauptschleife: Eingang beobachten (Polling genügt), dann die Warteschlange abarbeiten und den Nachbearbeitungs-Tag abfragen.
+- **Idempotent**: Jeder Schritt kann nach einem Absturz fortgesetzt werden. Die Schlüssel sind der SHA-256 des Originals bzw. die paperless-ID. Ein Upload darf nie doppelt passieren. Deshalb wird der Status vor dem Upload persistiert und vor dem nächsten Versuch die Task-ID bzw. die paperless-Prüfsumme geprüft.
+- **Fehlerklassen**: vorübergehende Fehler (Netz, 5xx, Ollama) werden mit Backoff wiederholt, dauerhafte Fehler führen nach 5 Versuchen in `fehler/`.
+- **Tests offline**: Fake-Server für die paperless-API und für Ollama, synthetische Muster-PDFs. Alle Tests müssen ohne Netz laufen.
+- Meldungen, Prüfcodes und Konfigurationsschlüssel sind auf Deutsch, Bezeichner im Code dürfen englisch sein.
+- **Wiederverwendbar aus dem Prototyp `rechnung-sidecar`**: JSON-Schema und Prompt für die Rechnungsdaten, `normalize`, `validate`, `complete_vat`, `build_cii`, der paperless-API-Client (HTTPS-Pflicht, Hash-Streaming, Tag-Auflösung) und der Duplikatindex. Der Prototyp arbeitete nach dem Import, nopaper arbeitet davor. Den Ablauf entsprechend anpassen.
+
+## 12. Offene Punkte
+
+Die Punkte 1–4 sind in Version 1.0 mit Standardwerten umgesetzt (E15). Ändert der Verantwortliche sie, muss diese Datei angepasst werden.
+
+1. Inhalt des Batch-Ordners – Standard: nur XML.
+2. Abholung und Aufbewahrung – Standard: Die Abholung löscht, nopaper behält keine Kopie.
+3. Korrespondent – Standard: nein, der Rechnungssteller wird nur als Feld und im Sidecar geführt.
+4. Eingangsdateien – Standard: nach bestätigtem Upload löschen.
+5. **Konkrete Tag-Namen** – trägt der Verantwortliche in `config.json` ein.
+6. **Scanner-Anbindung** – optional per Samba (`SAMBA=1` im Installer). Der Scanner muss SMB ≥ 2.1 können, Verschlüsselung ist „desired“.
+7. **Validierung des XML** gegen das offizielle Factur-X-XSD bzw. die Schematron steht noch aus.
+8. **Modellvergleich** mit Musterbelegen auf der Ziel-VM (E14) steht noch aus. Werkzeug: `nopaper test --modell-text … --modell-bild …`, Auswertung über `zusammenfassung.csv` je Modell.
+9. **Erkenntnisse aus dem ersten Testbeleg (Bewirtungsbeleg, 2026-11-11)** – in Version 1.1 umgesetzt (a: unscharfe Verankerung + Namenskorrektur im Prompt, b: Regel bleibt, ergänzt um OCR-Verwechslungen O/D→0, c: Müllfilter E19, d: Kategorie `bewirtung` E17):
+   a. Der Rechnungssteller wird nicht gegen den Text geprüft (OCR „Trattorla Esernpio“). Vorschlag: Rechnungsdaten aus dem geglätteten Text lesen und den Namen unscharf verankern.
+   b. Die Verankerung des Bruttobetrags kann einen falsch gelesenen Betrag bestätigen („58, 00“). Die Summenprüfung fängt das ab. Diese Regel darf nicht aufgeweicht werden.
+   c. Handschriftliche Seiten (Bewirtungsnachweis) liefern OCR-Müll im Volltext. Personennamen werden nicht ausgelesen, das bleibt so.
+   d. Bewirtungsbelege als eigene Kategorie mit eigenem Tag (z. B. „Bewirtung“) prüfen.
+
+10. **Testsatz:** 20 typische Belege mit Soll-Werten (`*.soll.json`, nicht im Paket, liegen beim Verantwortlichen). Bei perfekt ausgelesenen Daten sind 3 von 14 Rechnungen rot, alle zu Recht (US-Datum mehrdeutig, Versicherung ohne Datum, OCR-Lesefehler im Datum). Von 10 eingeschleusten typischen Modellfehlern werden alle erkannt oder rechnerisch repariert.
+
+11. **Erster echter Lauf (2026-11-12, qwen3.5:9b + qwen3-vl:8b, CPU):** Einordnung 20/21 richtig. Falsch war eine Ticket-Rechnung → Buchungsbestätigung (Prompt angepasst). Ø 387 s pro Dokument, davon der größte Teil Glättung. Hauptfehlerquelle war die OCR von ocrmypdf (E23, E24). Die Modellausgaben dieses Laufs, mit den Regeln aus Version 1.2 nachgerechnet: Brutto 13/15, Netto 11/15, Steuer 12/15 (vorher 12/9/10).
+
+12. **Eigenes Modell (Vorschlag, noch nicht entschieden):** Training nur als Adapter (LoRA) auf unverändertem Grundmodell. Jede Generation wird vollständig neu aus den freigegebenen Belegen innerhalb der Aufbewahrungsfrist trainiert, die Vorgängergeneration wird gelöscht. Jede Generation bekommt einen Herkunftsnachweis (Zeitraum, Anzahl, Hash-Liste der Dokument-IDs). Trainiert wird nur mit Kopfdaten. Voraussetzung ist der Freigabe-Workflow (noch zu bauen). Rhythmus jährlich (Fristende zum Kalenderjahr, § 147 Abs. 4 AO). Ein Modell gilt als weiterer Speicherort (EDPB Opinion 28/2024).
+13. **Lernen aus Buchungen** – entschieden (E34–E39), Umsetzung in Version 1.5. Voraussetzung auf Aequa-Seite: Korrekturdateien nach Aequa F69. In 1.4.1 umgesetzt nach dem ersten Holdout-Lauf mit drei unbekannten Kassenbons (29 von 30 Feldern richtig): E44 und Belegnummer im Steuernummern-Format mit Bezeichnung. Skonto ist an echten Belegen noch nicht gemessen (kein Beleg mit Skonto im Testsatz).
+
+14. **Modellvergleich auf CPU (2026-11-12/13, 20 Belege, ohne Bild-Rückfall und Glättung bei NuExtract):**
+
+| Feld | qwen3.5:9b (1.2, mit Glättung + Rückfall) | NuExtract3 Bild | NuExtract3 Text |
+|---|---|---|---|
+| Rechnung ja/nein | 18/19 | 19/19 | 18/19 |
+| Kategorie | 18/19 | 19/19 | 16/19 |
+| Rechnungsnummer | 9/9 | 8/9 | 8/9 |
+| Datum | 13/14 | 13/14 | 10/14 |
+| Brutto | 14/14 | 13/14 | 13/14 |
+| Netto | 12/14 | 11/14 | 10/14 |
+| Steuer | 13/14 | 12/14 | 11/14 |
+| Rechnungssteller | 13/14 | 13/14 (14 nach Soll-Korrektur) | 11/14 |
+| Steuer-ID | 10/14 | 11/14 (12 nach Soll-Korrektur) | 8/14 |
+| IBAN | 14/14 | 14/14 | 14/14 |
+| Ø Analyse / Ø gesamt | 99 s / 322 s | 172 s / 204 s | 98 s / 134 s |
+
+Ergebnis: NuExtract im Bild-Modus ist gleichauf mit qwen, mit den Korrekturen aus 1.4 (E30–E32) voraussichtlich besser. Der Text-Modus ist schwächer (ein Postbeleg als Brief, ein Tankbeleg als Gutschrift). Auf CPU ist der Bild-Modus langsamer als der Text; mit GPU spielt das keine Rolle. Alle Werte stammen aus dem Trainingssatz; ein unabhängiger Testsatz steht aus.
+
+## 13. Aufbau des Codes (Version 1.4.10)
+
+| Datei | Inhalt |
+|---|---|
+| `lib/nopaper/config.py` | JSON laden und prüfen, Feldschlüssel → paperless-Datentyp |
+| `lib/nopaper/ocr.py` | ocrmypdf auf einer Kopie, `--sidecar`-Text; Seitenbild per pdftoppm |
+| `lib/nopaper/llm.py` | Ollama-Client, Einordnung, Glättung (abschnittsweise, Ziffern- und Längenregel), Rechnungsdaten aus Text oder Bild |
+| `lib/nopaper/invoice.py` | Schema, Prompt, `normalize`, `validate`, `complete_vat`, `build_cii`, `atomic_write` |
+| `lib/nopaper/paperless.py` | API-Client: Upload (Multipart), Task-Abfrage, Metadaten, Hash-Streaming, PATCH |
+| `lib/nopaper/state.py` | SQLite: Eingang, Nachbearbeitung, Duplikat-Hashes |
+| `lib/nopaper/pipeline.py` | Ablauf beider Wege, Wiederholungen, Fehlerordner |
+| `lib/nopaper/testlauf.py` | Testlauf **ohne paperless** (`nopaper test`): Ergebnisse je Modell unter `/srv/nopaper/test/ergebnis`, nur mit Musterbelegen |
+| `lib/nopaper/main.py` | CLI: `run`, `once`, `check`, `status`, `nachbearbeiten <id>`, `test`, `paperless-skript` |
+| `tests/test_nopaper.py` | Offline-Tests mit Fake-paperless/Ollama |

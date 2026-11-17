@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Nach dem Bearbeiten der Konfiguration und dem Hinterlegen des Tokens ausfuehren (als root):
+#   nopaper-aktivieren              Standard-Instanz
+#   nopaper-aktivieren kanzlei      Mandant
+# Gibt im Dienst nur die IP(s) des paperless-Hosts frei, prueft alles und startet den Dienst.
+set -euo pipefail
+[[ $EUID -eq 0 ]] || { echo "bitte als root ausfuehren" >&2; exit 1; }
+
+M="${1:-}"
+if [[ -n "$M" ]]; then
+  [[ "$M" =~ ^[a-z][a-z0-9]{1,14}$ ]] || { echo "ungueltiger Mandantenname" >&2; exit 2; }
+  CFG="/etc/nopaper-mandanten/$M/config.json"
+  DIENST="nopaper@$M"
+  MARKE="nopaper-paperless-$M"
+  CLI=(nopaper --mandant "$M")
+  [[ -f "$CFG" ]] || { echo "Mandant '$M' gibt es nicht (nopaper-mandant anlegen $M)" >&2; exit 1; }
+else
+  CFG=/etc/nopaper/config.json
+  DIENST=nopaper
+  MARKE=nopaper-paperless
+  CLI=(nopaper)
+fi
+
+HOST="$(python3 -I -c 'import json,sys,urllib.parse;print(urllib.parse.urlsplit(json.load(open(sys.argv[1]))["paperless"]["url"]).hostname)' "$CFG")"
+IPS="$(getent ahosts "$HOST" | awk '{print $1}' | sort -u | tr '\n' ' ')"
+[[ -n "$IPS" ]] || { echo "paperless-Host $HOST nicht aufloesbar" >&2; exit 1; }
+
+install -d "/etc/systemd/system/$DIENST.service.d"
+cat > "/etc/systemd/system/$DIENST.service.d/10-paperless.conf" <<CONF
+# paperless-Host $HOST – bei IP-Wechsel nopaper-aktivieren erneut ausfuehren
+[Service]
+IPAddressAllow=$IPS
+CONF
+systemctl daemon-reload
+echo "Netzfreigabe fuer paperless ($HOST): $IPS"
+
+# Der Dienst darf nur localhost und den paperless-Host erreichen – also auch keinen DNS-Server.
+# Deshalb wird der Name fest in /etc/hosts eingetragen (ersetzt den frueheren Eintrag dieser Instanz).
+if ! [[ "$HOST" =~ ^[0-9.]+$ || "$HOST" == *:* || "$HOST" == "localhost" ]]; then
+  sed -i "/# $MARKE\$/d" /etc/hosts
+  for ip in $IPS; do
+    printf '%s %s # %s\n' "$ip" "$HOST" "$MARKE" >> /etc/hosts
+  done
+  echo "Namensaufloesung fuer $HOST fest in /etc/hosts eingetragen."
+fi
+
+if "${CLI[@]}" check; then
+  systemctl enable "$DIENST"
+  systemctl restart "$DIENST"
+  echo
+  echo "$DIENST laeuft.  Protokoll: journalctl -u $DIENST -f"
+else
+  echo
+  echo "Pruefung fehlgeschlagen – Dienst NICHT gestartet. Fehler beheben und erneut ausfuehren." >&2
+  exit 1
+fi

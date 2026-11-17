@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+nopaper-installer.sh
+*.soll.json
+*.pdf

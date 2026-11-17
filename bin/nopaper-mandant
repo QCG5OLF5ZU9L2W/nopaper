@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Mandanten verwalten: je Mandant ein eigener Dienst, eigener Systembenutzer, eigene Ordner,
+# eigene Konfiguration und ein eigenes paperless. Gemeinsam sind nur Programm und Sprachmodelle.
+#
+#   nopaper-mandant anlegen kanzlei      (als root)
+#   nopaper-mandant liste
+#
+# Danach: Konfiguration und Token eintragen, dann  nopaper-aktivieren kanzlei
+set -euo pipefail
+[[ $EUID -eq 0 ]] || { echo "bitte als root ausfuehren" >&2; exit 1; }
+CMD="${1:-}"; M="${2:-}"
+
+liste() {
+  printf '%-16s %-10s %s\n' MANDANT DIENST BEREICH
+  if [[ -f /etc/nopaper/config.json ]]; then
+    printf '%-16s %-10s %s\n' "(Standard)" "$(systemctl is-active nopaper 2>/dev/null || true)" /srv/nopaper
+  fi
+  for d in /etc/nopaper-mandanten/*/; do
+    [[ -f "${d}config.json" ]] || continue
+    n="$(basename "$d")"
+    printf '%-16s %-10s %s\n' "$n" "$(systemctl is-active "nopaper@$n" 2>/dev/null || true)" "/srv/nopaper-$n"
+  done
+}
+
+case "$CMD" in
+  liste) liste; exit 0 ;;
+  anlegen) ;;
+  *) echo "Aufruf: nopaper-mandant anlegen <name> | liste" >&2; exit 2 ;;
+esac
+
+[[ "$M" =~ ^[a-z][a-z0-9]{1,14}$ ]] || { echo "Mandantenname: 2-15 Zeichen, a-z und 0-9, Buchstabe zuerst" >&2; exit 2; }
+[[ -f /opt/nopaper/config.example.json ]] || { echo "nopaper ist nicht installiert" >&2; exit 1; }
+U="nopaper-$M"; BASE="/srv/nopaper-$M"; ETC="/etc/nopaper-mandanten/$M"
+
+getent group "$U-eingang"  >/dev/null || groupadd --system "$U-eingang"
+getent group "$U-abholung" >/dev/null || groupadd --system "$U-abholung"
+id "$U" >/dev/null 2>&1 || useradd --system --home-dir "$BASE/zustand" --shell /usr/sbin/nologin "$U"
+usermod -aG "$U-eingang,$U-abholung" "$U"
+
+install -d -m 0755 -o root -g root "$BASE" "$BASE/eingang" "$BASE/ausgang"
+install -d -m 2770 -o "$U" -g "$U-eingang"  "$BASE/eingang/rechnungen" "$BASE/eingang/dokumente"
+install -d -m 2770 -o "$U" -g "$U-abholung" "$BASE/ausgang/rechnungsdaten"
+install -d -m 0750 -o "$U" -g "$U" "$BASE/arbeit" "$BASE/fehler" "$BASE/zustand" "$BASE/zustand/cache" \
+  "$BASE/test" "$BASE/test/eingang" "$BASE/test/ergebnis"
+
+# Konfiguration: nur root und der Dienstbenutzer dieses Mandanten duerfen lesen
+install -d -m 0755 -o root -g root /etc/nopaper-mandanten
+install -d -m 0750 -o root -g "$U" "$ETC"
+if [[ ! -f "$ETC/config.json" ]]; then
+  python3 -I - /opt/nopaper/config.example.json "$ETC/config.json" "$BASE" "$ETC" <<'PY'
+import json, sys
+src, dst, base, etc = sys.argv[1:]
+d = json.load(open(src, encoding="utf-8"))
+d["basisverzeichnis"] = base
+d["paperless"]["token_datei"] = etc + "/paperless.token"
+d["eingang"] = {"rechnungen": base + "/eingang/rechnungen", "dokumente": base + "/eingang/dokumente",
+                "fehler": base + "/fehler"}
+d["ausgang"] = {"rechnungsdaten": base + "/ausgang/rechnungsdaten"}
+open(dst, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+PY
+  echo "Konfiguration angelegt: $ETC/config.json"
+else
+  echo "Konfiguration $ETC/config.json existiert – bleibt unveraendert"
+fi
+[[ -f "$ETC/paperless.token" ]] || install -m 0640 -o root -g "$U" /dev/null "$ETC/paperless.token"
+chown root:"$U" "$ETC/config.json" "$ETC/paperless.token"
+chmod 0640 "$ETC/config.json" "$ETC/paperless.token"
+
+cat <<TEXT
+
+Mandant '$M' ist angelegt.
+  Konfiguration: $ETC/config.json      (paperless.url, empfaenger, tags, felder)
+  Token:         $ETC/paperless.token
+  Eingang:       $BASE/eingang/rechnungen   $BASE/eingang/dokumente
+  Ausgang:       $BASE/ausgang/rechnungsdaten
+  Benutzer:      $U   Gruppen: $U-eingang, $U-abholung
+
+Naechste Schritte:
+  1. Konfiguration und Token eintragen
+  2. nopaper --mandant $M check
+  3. nopaper-aktivieren $M
+  Protokoll: journalctl -u nopaper@$M -f
+TEXT
