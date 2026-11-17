@@ -112,6 +112,25 @@ nopaper-mandant liste
 
 Limits: the tenants share the computing time, and the administrator of the machine can see all tenants.
 
+## Delivery to the accounting software kumero
+
+Optional. If the configuration contains a section `kumero`, nopaper sends every sidecar to kumero itself. The output folder then is the queue: a file stays there until kumero has accepted it. Nothing may be picked up or deleted there by hand any more.
+
+```json
+"kumero": {
+  "url": "https://kumero.example.org",
+  "mandant": "praxis",
+  "token_datei": "/etc/nopaper/kumero.token"
+}
+```
+
+- If kumero uses a self-signed certificate or an internal CA, additionally enter `"ca_datei": "/etc/nopaper/kumero-ca.pem"` and store the certificate there. For paperless the same exists as `paperless.ca_datei`. Certificate validation cannot be switched off.
+- The token is kept only in the token file (root:nopaper, 0640). Afterwards run `nopaper-aktivieren` so that the service may reach the kumero host.
+- `nopaper check` shows whether kumero is ready. `nopaper status` shows how many sidecars are waiting and how many were rejected.
+- If kumero cannot be reached, document processing continues and the sidecars are sent later (after 1, 5, 15 minutes, then hourly).
+- Rejected sidecars are stored under `ausgang/rechnungsdaten/abgelehnt/` with a companion file that names only the code.
+- With `tags.zu_buchen` nopaper additionally sets a tag meaning "still to be booked" on every receipt.
+
 ## Operation
 
 ```bash

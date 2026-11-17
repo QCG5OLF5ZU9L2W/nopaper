@@ -110,6 +110,25 @@ nopaper-mandant liste
 
 Grenzen: Die Mandanten teilen sich die Rechenzeit, und der Administrator der Maschine sieht alle Mandanten.
 
+## Einlieferung an die Buchhaltung kumero
+
+Optional. Ist in der Konfiguration ein Abschnitt `kumero` eingetragen, sendet nopaper jeden Sidecar selbst an kumero. Der Ausgangsordner ist dann die Warteschlange: Eine Datei bleibt liegen, bis kumero sie angenommen hat. Von Hand darf dort dann nichts mehr abgeholt oder gelöscht werden.
+
+```json
+"kumero": {
+  "url": "https://kumero.example.org",
+  "mandant": "praxis",
+  "token_datei": "/etc/nopaper/kumero.token"
+}
+```
+
+- Verwendet kumero ein selbst signiertes Zertifikat oder eine interne CA, trägst du zusätzlich `"ca_datei": "/etc/nopaper/kumero-ca.pem"` ein und legst das Zertifikat dort ab. Für paperless gibt es dasselbe als `paperless.ca_datei`. Die Zertifikatsprüfung lässt sich nicht abschalten.
+- Das Token steht nur in der Token-Datei (root:nopaper, 0640). Danach `nopaper-aktivieren` ausführen, damit der Dienst den kumero-Host erreichen darf.
+- `nopaper check` zeigt, ob kumero bereit ist. `nopaper status` zeigt, wie viele Sidecars warten und wie viele abgelehnt wurden.
+- Ist kumero nicht erreichbar, läuft die Belegverarbeitung weiter, und die Sidecars werden später gesendet (nach 1, 5, 15 Minuten, dann stündlich).
+- Abgelehnte Sidecars liegen unter `ausgang/rechnungsdaten/abgelehnt/` mit einer Begleitdatei, die nur den Code nennt.
+- Mit `tags.zu_buchen` setzt nopaper jedem Beleg zusätzlich ein Tag für „noch zu buchen“.
+
 ## Betrieb
 
 ```bash

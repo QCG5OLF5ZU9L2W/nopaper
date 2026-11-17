@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import VERSION, invoice, llm, ocr
 from .config import FELD_TYPEN, Config
+from .kumero import Kumero
 from .paperless import Paperless, PaperlessFehler, Voruebergehend
 from .state import State
 
@@ -135,6 +136,7 @@ class Nopaper:
         self.pl = pl or Paperless(cfg.paperless_url, cfg.token, cfg.ca_datei)
         self.ki = ki or llm.Ollama(cfg.ollama_url, cfg.num_ctx, cfg.ollama_timeout)
         self.state = state or State(cfg.zustand / "nopaper.db")
+        self.kumero = Kumero(cfg, self.state) if cfg.kumero_url else None
         self.ocr_text = ocr_text or ocr.ocr_text
         self.seite_als_bild = seite_als_bild or ocr.seite_als_bild
         self.zweite_lesung = zweite_lesung or ocr.zweite_lesung
@@ -272,14 +274,16 @@ class Nopaper:
         return rest + [{"field": k, "value": v} for k, v in neu.items()]
 
     def _sidecar(self, doc_id: int, inv: dict, issues: list[str], notes: list[str], quelle: str,
-                 sha_o: str, sha_a: str | None, methode: str, modell: str) -> None:
+                 sha_o: str, sha_a: str | None, methode: str, modell: str, md5_o: str | None = None) -> None:
         status = "ok" if not issues else "pruefen"
         if status != "ok" and not self.cfg.sidecar_bei_pruefen:
             return
         prov = {
             "paperless-document-id": doc_id,
             "paperless-url": f"{self.cfg.paperless_url}/documents/{doc_id}/details",
+            "belegart": inv.get("kategorie"),
             "sha256-original": sha_o,
+            "md5-original": md5_o,
             "sha256-archiv": sha_a,
             "quelle": quelle,
             "extraktion-modell": modell,
@@ -385,7 +389,7 @@ class Nopaper:
             self.pl.aendern(doc_id, patch)
 
             if ist_rechnung:
-                self._sidecar(doc_id, inv, issues, notes + codes, "scanner", sha_o, sha_a, methode, modell)
+                self._sidecar(doc_id, inv, issues, notes + codes, "scanner", sha_o, sha_a, methode, modell, md5_o)
 
         original.unlink()
         self.state.eingang_setzen(sha, status="fertig", fehler=None)
@@ -442,7 +446,8 @@ class Nopaper:
             if neuer_titel:
                 aenderung["title"] = neuer_titel
             self.pl.aendern(doc_id, aenderung)
-            self._sidecar(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a, methode, modell)
+            self._sidecar(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a, methode, modell,
+                          md5_o)
         log.info("nachbearbeitung doc=%s status=%s codes=%s dauer=%.0fs", doc_id, status,
                  ",".join(issues + notes + codes) or "-", time.monotonic() - t0)
         return status
@@ -458,6 +463,7 @@ class Nopaper:
             try:
                 self.eingang_verarbeiten(row)
                 n += 1
+                self.sidecars_zustellen()
             except (Voruebergehend, llm.OllamaNichtErreichbar) as e:
                 v = row["versuche"] + 1
                 self.state.eingang_setzen(sha, versuche=v, nicht_vor=self._backoff(v), fehler="VORUEBERGEHEND")
@@ -555,12 +561,24 @@ class Nopaper:
                     log.warning("nachbearbeitung doc=%s Versuch %s fehlgeschlagen (%s)", doc_id, v, code)
         return n
 
+    def sidecars_zustellen(self) -> int:
+        """Wartende Sidecars an kumero senden (E56). Darf die Belegverarbeitung nie aufhalten oder abbrechen."""
+        if self.kumero is None:
+            return 0
+        try:
+            return self.kumero.zustellen()
+        except Exception as e:  # noqa: BLE001 – bewusst alles abfangen
+            log.error("kumero: Einlieferung fehlgeschlagen (%s)", type(e).__name__)
+            return 0
+
     def ein_durchlauf(self) -> None:
+        self.sidecars_zustellen()
         self.eingang_scannen()
         self.eingang_abarbeiten()
         if time.time() - self._letzte_abfrage >= self.cfg.abfrage_intervall_s:
             self._letzte_abfrage = time.time()
             self.nachbearbeitung_abfragen()
+        self.sidecars_zustellen()
 
     def laufen(self) -> None:
         log.info("nopaper %s gestartet (extraktion=%s/%s, bild=%s, glaettung=%s)", VERSION, self.cfg.extraktor,

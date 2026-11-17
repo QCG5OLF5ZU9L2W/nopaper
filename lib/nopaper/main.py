@@ -168,6 +168,13 @@ def main(argv=None) -> int:
         except Voruebergehend as e:
             ok = False
             print(f"FEHL paperless nicht erreichbar: {e}")
+        if np.kumero is not None:
+            # kumero nicht erreichbar ist ein Hinweis, kein Startverbot: der Dienst laeuft auch ohne
+            code = np.kumero.pruefen()
+            if code is None:
+                print(f"ok   kumero {cfg.kumero_url} (Mandant {cfg.kumero_mandant}) bereit")
+            else:
+                print(f"WARN kumero: {code} – Sidecars bleiben in der Warteschlange")
         print("Alles in Ordnung." if ok else "Es gibt Fehler – siehe oben.")
         return 0 if ok else 1
 
@@ -178,6 +185,12 @@ def main(argv=None) -> int:
         for r in np.state.db.execute("SELECT sha256, versuche, fehler FROM eingang "
                                      "WHERE status IN ('wartend','hochgeladen') ORDER BY angelegt"):
             print(f"  offen {r['sha256'][:12]} versuche={r['versuche']} fehler={r['fehler'] or '-'}")
+        if np.kumero is not None:
+            u = np.kumero.uebersicht()
+            alt = f", aeltester seit {u['aeltester_s'] // 60} min" if u["wartend"] else ""
+            print(f"kumero  wartend {u['wartend']}{alt}, abgelehnt {u['abgelehnt']}")
+            if u["wartend"] and u["aeltester_s"] > 24 * 3600:
+                print("  WARNUNG: der aelteste Sidecar wartet laenger als einen Tag")
         return 0
 
     if args.cmd == "nachbearbeiten":

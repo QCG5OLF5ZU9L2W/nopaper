@@ -2,6 +2,17 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.5.1
+
+- **Selbst signierte Zertifikate für kumero:** neuer optionaler Schlüssel `kumero.ca_datei`. Das dort hinterlegte Zertifikat (selbst signiert oder interne CA) gilt als vertrauenswürdig. Die Prüfung bleibt immer an; ein nicht hinterlegtes Zertifikat wird abgelehnt.
+
+## 1.5.0
+
+- **Einlieferung der Sidecars an die Buchhaltung kumero** (optional, Abschnitt `kumero` in der Konfiguration): `PUT` je Sidecar mit `Idempotency-Key`, Warteschlange im Ausgangsordner, Wiederholung bei vorübergehenden Fehlern, Ordner `abgelehnt/` bei abgelehnten Sidecars, Anhalten bei ungültigem Token. Ohne den Abschnitt bleibt alles wie bisher.
+- **Sidecar 1.1:** Kennung `SCAN-SIDECAR/1.1`, neue Zeilen `belegart` und `md5-original`.
+- **Tag „noch zu buchen“:** optionaler Schlüssel `tags.zu_buchen`.
+- `nopaper check` und `nopaper status` zeigen den Zustand der Einlieferung. `nopaper-aktivieren` gibt zusätzlich den kumero-Host frei.
+
 ## 1.4.10
 
 - **Mandanten:** Auf derselben Maschine können mehrere Mandanten getrennt laufen. Jeder Mandant hat einen eigenen Dienst (`nopaper@<name>`), einen eigenen Systembenutzer, eigene Ordner unter `/srv/nopaper-<name>`, eine eigene Konfiguration unter `/etc/nopaper-mandanten/<name>` und ein eigenes paperless. Gemeinsam sind nur das Programm und die Sprachmodelle.

@@ -73,6 +73,11 @@ class Welt:
         self.bild_extraktion = None
         self.glaettung_kaputt = False
         self.llm_calls = []
+        # nachgebautes kumero (Buchhaltung): Verhalten und Mitschnitt
+        self.kumero_modus = "ok"          # ok | 503 | 422 | 401 | 404 | 429 | langsam | falscher_hash
+        self.kumero_status_modus = "ok"   # ok | 401 | 404 | 503 | nicht_bereit
+        self.kumero_anfragen = []         # (Methode, Pfad, Kopfzeilen als dict, Koerper)
+        self.kumero_bekannt = {}          # paperless_id -> sha256
 
 
 W = Welt()
@@ -85,7 +90,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # der Client hat wegen Zeitueberschreitung schon aufgelegt
 
     def _body(self):
         return self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -93,7 +101,55 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _kumero(self, methode):
+        body = self._body() if methode == "PUT" else b""
+        kopf = {k.lower(): v for k, v in self.headers.items()}
+        W.kumero_anfragen.append((methode, self.path, kopf, body))
+        if kopf.get("authorization") != "Bearer kmr_testtoken":
+            return self._send({"detail": "unauthorized"}, code=401)
+        if self.path.endswith("/belegeingang/status"):
+            m = W.kumero_status_modus
+            if m == "ok":
+                return self._send({"bereit": True})
+            if m == "nicht_bereit":
+                return self._send({"bereit": False})
+            return self._send({}, code=int(m))
+        m = W.kumero_modus
+        if m == "langsam":
+            time.sleep(1.5)
+            m = "ok"
+        if m == "503":
+            return self._send({}, code=503)
+        if m in ("401", "404"):
+            return self._send({}, code=int(m))
+        if m == "429":
+            self.send_response(429)
+            self.send_header("Retry-After", "30")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if m == "422":
+            return self._send({"type": "about:blank", "code": "sidecar.pflichtangabe"},
+                              ctype="application/problem+json", code=422)
+        pid = int(self.path.rsplit("/", 1)[1])
+        sha = hashlib.sha256(body).hexdigest()
+        if m == "falscher_hash":
+            return self._send({"ergebnis": "angelegt", "paperless_id": pid, "sha256": "0" * 64}, code=201)
+        if W.kumero_bekannt.get(pid) == sha:
+            return self._send({"ergebnis": "unveraendert", "paperless_id": pid, "sha256": sha})
+        neu = pid not in W.kumero_bekannt
+        W.kumero_bekannt[pid] = sha
+        self._send({"ergebnis": "angelegt" if neu else "ersetzt", "paperless_id": pid, "sha256": sha},
+                   code=201 if neu else 200)
+
+    def do_PUT(self):
+        if self.path.startswith("/m/"):
+            return self._kumero("PUT")
+        self._send({}, code=404)
+
     def do_GET(self):
+        if self.path.startswith("/m/"):
+            return self._kumero("GET")
         u = urllib.parse.urlsplit(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
         if u.path == "/api/tags":  # Ollama
@@ -430,6 +486,253 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(list(self.cfg.ausgang_rechnungsdaten.glob("*.xml")), [])
         self.assertFalse(ocr.text_nicht_schlechter("guter langer Text mit Inhalt", ""))
         self.assertTrue(ocr.text_nicht_schlechter("", "neuer Text"))
+
+    # ------------------------------------------------------------------ kumero (E56), Messpunkte des Auftrags
+    def mit_kumero(self, url=None, token="kmr_testtoken\n", ca=None):
+        d = json.loads((self.tmp / "config.json").read_text())
+        (self.tmp / "kumero.token").write_text(token)
+        d["kumero"] = {"url": url or self.base, "mandant": "praxis", "token_datei": str(self.tmp / "kumero.token")}
+        if ca:
+            d["kumero"]["ca_datei"] = str(ca)
+        d["tags"]["zu_buchen"] = "Scan"   # irgendein vorhandener Tag als "noch zu buchen"
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        self.cfg = config.load(self.tmp / "config.json")
+        self.np = Nopaper(self.cfg, ocr_text=fake_ocr, seite_als_bild=lambda o, w: "QklMRA==",
+                          zweite_lesung=lambda o, w, s="deu": "")
+        return self.np
+
+    def sidecar_erzeugen(self, name="k1.pdf", inhalt=b"%PDF RECHNUNG kumero 1"):
+        """Verarbeitet einen Beleg, waehrend kumero nicht antwortet – der Sidecar bleibt in der Warteschlange."""
+        W.kumero_modus = "503"
+        self.scan("rechnungen", name, inhalt)
+        self.np.ein_durchlauf()
+        dateien = sorted((self.tmp / "aus").glob("*.xml"))
+        self.assertEqual(len(dateien), 1)
+        W.kumero_anfragen.clear()
+        self.np.state.db.execute("UPDATE zustellung SET nicht_vor=0")
+        return dateien[0]
+
+    def test_kumero_einliefern_und_sidecar_1_1(self):
+        np = self.mit_kumero()
+        orig = b"%PDF RECHNUNG kumero 1"
+        datei = self.sidecar_erzeugen(inhalt=orig)
+        inhalt = datei.read_bytes()
+        doc_id = int(datei.stem)
+        # Messpunkt 8: Kennung 1.1, belegart, md5-original
+        self.assertIn(b"SCAN-SIDECAR/1.1", inhalt)
+        _, note = self.note(doc_id)
+        self.assertEqual(note["belegart"], "rechnung")
+        self.assertEqual(note["md5-original"], hashlib.md5(orig).hexdigest())
+        self.assertIn("Scan", self.tagnamen(doc_id))                      # Tag "noch zu buchen"
+        # Messpunkt 1: PUT mit vier Kopfzeilen, Koerper Byte fuer Byte, Schluessel = SHA-256
+        W.kumero_modus = "ok"
+        self.assertEqual(np.sidecars_zustellen(), 1)
+        methode, pfad, kopf, body = W.kumero_anfragen[-1]
+        self.assertEqual(methode, "PUT")
+        self.assertEqual(pfad, f"/m/praxis/api/v1/belegeingang/sidecars/{doc_id}")
+        self.assertEqual(body, inhalt)
+        self.assertEqual(kopf["idempotency-key"], hashlib.sha256(inhalt).hexdigest())
+        self.assertEqual(kopf["content-type"], "application/xml")
+        self.assertEqual(kopf["accept"], "application/json")
+        self.assertEqual(kopf["authorization"], "Bearer kmr_testtoken")
+        # Messpunkt 2: nach 201 ist die Datei weg
+        self.assertFalse(datei.exists())
+        self.assertEqual(np.kumero.uebersicht()["wartend"], 0)
+
+    def test_kumero_unveraendert_und_falscher_hash(self):
+        np = self.mit_kumero()
+        datei = self.sidecar_erzeugen()
+        inhalt = datei.read_bytes()
+        W.kumero_bekannt[int(datei.stem)] = hashlib.sha256(inhalt).hexdigest()
+        W.kumero_modus = "ok"
+        self.assertEqual(np.sidecars_zustellen(), 1)                      # 200 "unveraendert"
+        self.assertFalse(datei.exists())
+        datei.write_bytes(inhalt)
+        W.kumero_modus = "falscher_hash"
+        self.assertEqual(np.sidecars_zustellen(), 0)                      # abweichender Hash wie 5xx
+        self.assertTrue(datei.exists())
+
+    def test_kumero_voruebergehend_und_zeitueberschreitung(self):
+        np = self.mit_kumero()
+        datei = self.sidecar_erzeugen()
+        schluessel = hashlib.sha256(datei.read_bytes()).hexdigest()
+        # Messpunkt 3: nach 503 liegt die Datei noch da ...
+        self.assertEqual(np.sidecars_zustellen(), 0)
+        self.assertTrue(datei.exists())
+        self.assertEqual(len(W.kumero_anfragen), 1)
+        self.assertEqual(np.sidecars_zustellen(), 0)                      # Wartezeit: kein zweiter Versuch
+        self.assertEqual(len(W.kumero_anfragen), 1)
+        row = np.state.zustellung(datei.name)
+        self.assertGreaterEqual(row["nicht_vor"] - time.time(), 250)      # zweiter Abstand: 5 min
+        # ... ebenso nach einer Zeitueberschreitung
+        np.state.db.execute("UPDATE zustellung SET nicht_vor=0")
+        np.kumero.timeout = 0.5
+        W.kumero_modus = "langsam"
+        self.assertEqual(np.sidecars_zustellen(), 0)
+        self.assertTrue(datei.exists())
+        # ... und wird spaeter mit demselben Schluessel erneut gesendet
+        np.state.db.execute("UPDATE zustellung SET nicht_vor=0")
+        np.kumero.timeout = 30
+        W.kumero_modus = "ok"
+        time.sleep(1.6)                                                   # der langsame Aufruf laeuft im Server aus
+        self.assertEqual(np.sidecars_zustellen(), 1)
+        self.assertEqual({a[2]["idempotency-key"] for a in W.kumero_anfragen if a[0] == "PUT"}, {schluessel})
+        self.assertFalse(datei.exists())
+
+    def test_kumero_abgelehnt(self):
+        np = self.mit_kumero()
+        datei = self.sidecar_erzeugen()
+        W.kumero_modus = "422"
+        np.sidecars_zustellen()
+        # Messpunkt 4: liegt in abgelehnt/ mit Begleitdatei, wird nicht erneut gesendet
+        ziel = self.tmp / "aus" / "abgelehnt" / datei.name
+        self.assertTrue(ziel.exists() and not datei.exists())
+        info = json.loads(ziel.with_name(ziel.name + ".abgelehnt.json").read_text())
+        self.assertEqual(sorted(info), ["code", "zeit"])
+        self.assertEqual(info["code"], "sidecar.pflichtangabe")
+        n = len(W.kumero_anfragen)
+        W.kumero_modus = "ok"
+        np.sidecars_zustellen()
+        self.assertEqual(len(W.kumero_anfragen), n)
+        self.assertEqual(np.kumero.uebersicht()["abgelehnt"], 1)
+
+    def test_kumero_token_ungueltig_haelt_an(self):
+        np = self.mit_kumero()
+        datei = self.sidecar_erzeugen()
+        W.kumero_modus = "401"
+        np.sidecars_zustellen()
+        n = len(W.kumero_anfragen)
+        W.kumero_modus = "ok"
+        np.sidecars_zustellen()
+        # Messpunkt 5: nichts mehr gesendet, Sidecar bleibt, Belegverarbeitung laeuft weiter
+        self.assertEqual(len(W.kumero_anfragen), n)
+        self.assertTrue(datei.exists())
+        self.scan("rechnungen", "k2.pdf", b"%PDF RECHNUNG kumero 2")
+        np.ein_durchlauf()
+        self.assertEqual(len(W.docs), 2)
+        self.assertEqual(len(W.kumero_anfragen), n)
+        # nach dem Ersetzen der Token-Datei geht es weiter
+        (self.tmp / "kumero.token").write_text("kmr_testtoken\n\n")      # gleiches Token, Datei unveraendert im Inhalt
+        np.sidecars_zustellen()
+        self.assertEqual(len(W.kumero_anfragen), n)
+        (self.tmp / "kumero.token").write_text("kmr_anderes\n")
+        np.sidecars_zustellen()                                           # neues Token -> neuer Versuch (hier 401 vom Test-Server)
+        self.assertGreater(len(W.kumero_anfragen), n)
+
+    def test_kumero_429_wartet(self):
+        np = self.mit_kumero()
+        self.sidecar_erzeugen()
+        W.kumero_modus = "429"
+        t = time.time()
+        np.sidecars_zustellen()
+        # Messpunkt 6: fruehestens 30 Sekunden Pause
+        self.assertGreaterEqual(np.kumero._pause_bis - t, 29.5)
+        n = len(W.kumero_anfragen)
+        W.kumero_modus = "ok"
+        np.sidecars_zustellen()
+        self.assertEqual(len(W.kumero_anfragen), n)
+
+    def test_kumero_ohne_abschnitt_wie_bisher(self):
+        # Messpunkt 7: ohne Abschnitt kumero bleibt der Sidecar im Abholordner, es gibt keinen Aufruf
+        self.assertIsNone(self.np.kumero)
+        self.scan("rechnungen", "k3.pdf", b"%PDF RECHNUNG ohne kumero")
+        self.np.ein_durchlauf()
+        self.assertEqual(len(list((self.tmp / "aus").glob("*.xml"))), 1)
+        self.assertEqual(W.kumero_anfragen, [])
+
+    def test_kumero_pruefen_und_keine_geheimnisse_im_log(self):
+        np = self.mit_kumero()
+        # Messpunkt 10: die vier Fehlerfaelle von `check`
+        self.assertIsNone(np.kumero.pruefen())
+        for modus, code in (("401", "KUMERO_TOKEN"), ("404", "KUMERO_ZIEL"), ("nicht_bereit", "KUMERO_ZIEL"),
+                            ("503", "KUMERO_NICHT_ERREICHBAR")):
+            W.kumero_status_modus = modus
+            self.assertEqual(np.kumero.pruefen(), code)
+        W.kumero_status_modus = "ok"
+        (self.tmp / "kumero.token").write_text("")
+        self.assertEqual(np.kumero.pruefen(), "KUMERO_TOKEN")
+        tot = self.mit_kumero(url="http://127.0.0.1:9")                   # nichts lauscht dort
+        self.assertEqual(tot.kumero.pruefen(), "KUMERO_NICHT_ERREICHBAR")
+        # Befehle `check` und `status` zeigen kumero an, ohne Token
+        import contextlib
+        import io
+        from nopaper.main import main as cli
+        self.mit_kumero()
+        aus = io.StringIO()
+        with contextlib.redirect_stdout(aus):
+            cli(["--config", str(self.tmp / "config.json"), "check"])
+            W.kumero_status_modus = "503"
+            cli(["--config", str(self.tmp / "config.json"), "check"])
+            W.kumero_status_modus = "ok"
+            cli(["--config", str(self.tmp / "config.json"), "status"])
+        text = aus.getvalue()
+        self.assertIn("ok   kumero", text)
+        self.assertIn("WARN kumero: KUMERO_NICHT_ERREICHBAR", text)
+        self.assertIn("kumero  wartend 0, abgelehnt 0", text)
+        self.assertNotIn("kmr_testtoken", text)
+        # Messpunkt 11a: http:// ausserhalb von localhost wird beim Start abgelehnt
+        d = json.loads((self.tmp / "config.json").read_text())
+        d["kumero"]["url"] = "http://kumero.example.org"
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        with self.assertRaises(config.ConfigError) as e:
+            config.load(self.tmp / "config.json")
+        self.assertIn("KUMERO_URL", str(e.exception))
+        # Messpunkt 9: in keinem Log stehen Token oder Belegangaben
+        np = self.mit_kumero()
+        self.sidecar_erzeugen()
+        with self.assertLogs("nopaper", level="INFO") as lg:
+            for modus in ("503", "429", "422"):
+                W.kumero_modus = modus
+                np.kumero._pause_bis = 0
+                np.state.db.execute("UPDATE zustellung SET nicht_vor=0")
+                np.sidecars_zustellen()
+            self.scan("rechnungen", "k4.pdf", b"%PDF RECHNUNG kumero 4")
+            W.kumero_modus = "401"
+            np.kumero._pause_bis = 0
+            np.ein_durchlauf()
+        alles = "\n".join(lg.output)
+        self.assertIn("kumero:", alles)
+        for geheim in ("kmr_testtoken", "RE-2026-0815", "1234.56", "1.234,56", "Praxis Dr. Beispiel",
+                       "DE89370400440532013000"):
+            self.assertNotIn(geheim, alles)
+
+    def test_kumero_ungueltiges_zertifikat(self):
+        # Messpunkt 11b: ein nicht vertrauenswuerdiges Zertifikat wird abgelehnt (nichts wird gesendet)
+        import ssl
+        import subprocess
+        if not shutil.which("openssl"):
+            self.skipTest("openssl fehlt")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+                        "-keyout", str(self.tmp / "k.pem"), "-out", str(self.tmp / "c.pem")],
+                       check=True, capture_output=True)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(str(self.tmp / "c.pem"), str(self.tmp / "k.pem"))
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            np = self.mit_kumero(url=f"https://localhost:{srv.server_port}")
+            self.assertEqual(np.kumero.pruefen(), "KUMERO_NICHT_ERREICHBAR")
+            datei = self.sidecar_erzeugen()
+            W.kumero_modus = "ok"
+            self.assertEqual(np.sidecars_zustellen(), 0)
+            self.assertTrue(datei.exists())
+            self.assertEqual(W.kumero_anfragen, [])
+            # Dasselbe selbst signierte Zertifikat, ausdruecklich als vertrauenswuerdig hinterlegt: zulaessig
+            np = self.mit_kumero(url=f"https://localhost:{srv.server_port}", ca=self.tmp / "c.pem")
+            self.assertIsNone(np.kumero.pruefen())
+            np.state.db.execute("UPDATE zustellung SET nicht_vor=0")   # Wartezeit des Fehlversuchs ueberspringen
+            self.assertEqual(np.sidecars_zustellen(), 1)
+            self.assertFalse(datei.exists())
+            # ... aber nur fuer den Namen, auf den es ausgestellt ist
+            np = self.mit_kumero(url=f"https://127.0.0.1:{srv.server_port}", ca=self.tmp / "c.pem")
+            self.assertEqual(np.kumero.pruefen(), "KUMERO_NICHT_ERREICHBAR")
+            # eine fehlende Zertifikatsdatei wird beim Start gemeldet
+            with self.assertRaises(config.ConfigError):
+                self.mit_kumero(ca=self.tmp / "gibt-es-nicht.pem")
+        finally:
+            srv.shutdown()
 
     def test_nachbearbeitung(self):
         W.docs[60] = {"id": 60, "content": "alt", "tags": [3, 5], "custom_fields": [{"field": 99, "value": "x"}],

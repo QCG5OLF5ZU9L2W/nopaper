@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 GUIDELINE_ID = "urn:factur-x.eu:1p0:basicwl"
-SIDECAR_KENNUNG = "SCAN-SIDECAR/1.0"
+SIDECAR_KENNUNG = "SCAN-SIDECAR/1.1"
 
 # --------------------------------------------------------------------------- Hilfsfunktionen
 
@@ -777,7 +777,7 @@ def titel(inv: dict, vorlage: str) -> str | None:
 
 
 def skonto_text(inv: dict) -> str | None:
-    """Maschinenlesbar je Stufe 'satz:frist:betrag', Stufen mit ';' getrennt (wie Aequa F66).
+    """Maschinenlesbar je Stufe 'satz:frist:betrag', Stufen mit ';' getrennt.
     Frist als Datum JJJJ-MM-TT, ersatzweise 'T<tage>'; leerer Teil = nicht auf dem Beleg."""
     teile = []
     for s in inv.get("skonto") or []:

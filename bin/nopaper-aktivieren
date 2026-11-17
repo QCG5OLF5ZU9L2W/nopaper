@@ -26,14 +26,23 @@ HOST="$(python3 -I -c 'import json,sys,urllib.parse;print(urllib.parse.urlsplit(
 IPS="$(getent ahosts "$HOST" | awk '{print $1}' | sort -u | tr '\n' ' ')"
 [[ -n "$IPS" ]] || { echo "paperless-Host $HOST nicht aufloesbar" >&2; exit 1; }
 
+# Buchhaltung kumero (optional): genau dieser eine weitere Host wird freigegeben
+KHOST="$(python3 -I -c 'import json,sys,urllib.parse;k=json.load(open(sys.argv[1])).get("kumero") or {};print(urllib.parse.urlsplit(k.get("url","")).hostname or "")' "$CFG")"
+KIPS=""
+if [[ -n "$KHOST" ]]; then
+  KIPS="$(getent ahosts "$KHOST" | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  [[ -n "$KIPS" ]] || echo "WARNUNG: kumero-Host $KHOST nicht aufloesbar – Sidecars bleiben in der Warteschlange" >&2
+fi
+
 install -d "/etc/systemd/system/$DIENST.service.d"
 cat > "/etc/systemd/system/$DIENST.service.d/10-paperless.conf" <<CONF
-# paperless-Host $HOST – bei IP-Wechsel nopaper-aktivieren erneut ausfuehren
+# paperless-Host $HOST${KHOST:+, kumero-Host $KHOST} – bei IP-Wechsel nopaper-aktivieren erneut ausfuehren
 [Service]
-IPAddressAllow=$IPS
+IPAddressAllow=$IPS $KIPS
 CONF
 systemctl daemon-reload
 echo "Netzfreigabe fuer paperless ($HOST): $IPS"
+[[ -n "$KIPS" ]] && echo "Netzfreigabe fuer kumero ($KHOST): $KIPS"
 
 # Der Dienst darf nur localhost und den paperless-Host erreichen – also auch keinen DNS-Server.
 # Deshalb wird der Name fest in /etc/hosts eingetragen (ersetzt den frueheren Eintrag dieser Instanz).
@@ -43,6 +52,13 @@ if ! [[ "$HOST" =~ ^[0-9.]+$ || "$HOST" == *:* || "$HOST" == "localhost" ]]; the
     printf '%s %s # %s\n' "$ip" "$HOST" "$MARKE" >> /etc/hosts
   done
   echo "Namensaufloesung fuer $HOST fest in /etc/hosts eingetragen."
+fi
+if [[ -n "$KIPS" ]] && ! [[ "$KHOST" =~ ^[0-9.]+$ || "$KHOST" == *:* || "$KHOST" == "localhost" ]]; then
+  sed -i "/# ${MARKE/paperless/kumero}\$/d" /etc/hosts
+  for ip in $KIPS; do
+    printf '%s %s # %s\n' "$ip" "$KHOST" "${MARKE/paperless/kumero}" >> /etc/hosts
+  done
+  echo "Namensaufloesung fuer $KHOST fest in /etc/hosts eingetragen."
 fi
 
 if "${CLI[@]}" check; then

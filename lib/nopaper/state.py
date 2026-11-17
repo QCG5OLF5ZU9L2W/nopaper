@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS nachbearbeitung (
     fehler      TEXT,
     geaendert   REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS zustellung (
+    datei       TEXT PRIMARY KEY,       -- Dateiname des Sidecars in der Warteschlange
+    sha256      TEXT NOT NULL,          -- Inhalt, auf den sich die Versuche beziehen
+    versuche    INTEGER NOT NULL DEFAULT 0,
+    nicht_vor   REAL NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS duplikate (
     schluessel  TEXT PRIMARY KEY,       -- SHA-256(Absender|Rechnungsnummer)
     doc_id      INTEGER NOT NULL
@@ -75,6 +81,19 @@ class State:
 
     def nach_loeschen(self, doc_id: int) -> None:
         self.db.execute("DELETE FROM nachbearbeitung WHERE doc_id=?", (doc_id,))
+
+    # ------------------------------------------------------------------ Zustellung an kumero
+    def zustellung(self, datei: str):
+        return self.db.execute("SELECT * FROM zustellung WHERE datei=?", (datei,)).fetchone()
+
+    def zustellung_setzen(self, datei: str, sha: str, versuche: int, nicht_vor: float) -> None:
+        self.db.execute(
+            "INSERT INTO zustellung(datei, sha256, versuche, nicht_vor) VALUES (?,?,?,?) "
+            "ON CONFLICT(datei) DO UPDATE SET sha256=excluded.sha256, versuche=excluded.versuche, "
+            "nicht_vor=excluded.nicht_vor", (datei, sha, versuche, nicht_vor))
+
+    def zustellung_loeschen(self, datei: str) -> None:
+        self.db.execute("DELETE FROM zustellung WHERE datei=?", (datei,))
 
     # ------------------------------------------------------------------ Duplikate
     def duplikat(self, absender: str, rechnungsnummer: str, doc_id: int) -> int | None:

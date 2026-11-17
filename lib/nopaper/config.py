@@ -74,6 +74,11 @@ class Config:
     nuextract_seiten: int = 3
     kategorie_tags: dict[str, list[str]] = field(default_factory=dict)
     tag_text: str = ""
+    tag_zu_buchen: str = ""
+    kumero_url: str = ""
+    kumero_mandant: str = ""
+    kumero_token_datei: str = ""
+    kumero_ca_datei: str = ""
     test: Path = Path("/srv/nopaper/test")
 
     @property
@@ -174,6 +179,7 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         tag_pruefen=str(tags.get("pruefen") or "").strip(),
         tag_ausloeser=str(_req(d, "tags.ausloeser_nachbearbeitung")).strip(),
         tag_text=str(tags.get("ausloeser_text") or "").strip(),
+        tag_zu_buchen=str(tags.get("zu_buchen") or "").strip(),
         felder={k: v.strip() for k, v in felder.items()},
         empfaenger=str(_req(d, "empfaenger")).strip(),
         modell_text=str(_req(d, "modelle.text")),
@@ -204,6 +210,33 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         raise ConfigError("empfaenger ist noch der Platzhalter – bitte den Namen der eigenen Organisation eintragen")
     if not cfg.tag_ausloeser:
         raise ConfigError("tags.ausloeser_nachbearbeitung darf nicht leer sein")
+    # Tag "noch zu buchen" (optional): gehoert zu jedem als Rechnung/Beleg verarbeiteten Dokument
+    if cfg.tag_zu_buchen and cfg.tag_zu_buchen.lower() not in {t.lower() for t in cfg.tags_rechnung}:
+        cfg.tags_rechnung.append(cfg.tag_zu_buchen)
+    # Einlieferung an die Buchhaltung kumero (optional, E56)
+    k = d.get("kumero")
+    if k is not None:
+        if not isinstance(k, dict):
+            raise ConfigError("kumero muss ein Objekt sein (KUMERO_URL)")
+        kurl = str(k.get("url") or "").rstrip("/")
+        ku = urllib.parse.urlsplit(kurl)
+        if ku.scheme not in ("http", "https") or not ku.hostname:
+            raise ConfigError("kumero.url fehlt oder ist ungueltig (KUMERO_URL)")
+        if ku.scheme != "https" and ku.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise ConfigError("kumero.url muss https:// sein (KUMERO_URL)")
+        mandant = str(k.get("mandant") or "").strip()
+        if not mandant or not all(c.isalnum() or c in "-_" for c in mandant):
+            raise ConfigError("kumero.mandant fehlt oder enthaelt unzulaessige Zeichen (KUMERO_ZIEL)")
+        if not str(k.get("token_datei") or "").strip():
+            raise ConfigError("kumero.token_datei fehlt (KUMERO_TOKEN)")
+        cfg.kumero_url, cfg.kumero_mandant = kurl, mandant
+        cfg.kumero_token_datei = str(k["token_datei"]).strip()
+        # eigenes Zertifikat der Gegenstelle (selbst signiert oder interne CA): wird als vertrauenswuerdig
+        # hinterlegt – die Pruefung selbst wird nie abgeschaltet
+        kca = str(k.get("ca_datei") or "").strip()
+        if kca and not Path(kca).is_file():
+            raise ConfigError(f"kumero.ca_datei {kca} nicht gefunden (KUMERO_URL)")
+        cfg.kumero_ca_datei = kca
     if cfg.tag_text and cfg.tag_text.lower() in {t.lower() for t in [cfg.tag_ausloeser, cfg.tag_pruefen,
                                                                        *cfg.tags_rechnung, *cfg.tags_dokument]}:
         raise ConfigError("tags.ausloeser_text muss ein eigener Tag sein")
