@@ -1,5 +1,7 @@
 # AGENTS.md – nopaper
 
+**Deutsch** | [English](AGENTS.en.md)
+
 Diese Datei hält fest, **was** gebaut wird und **welche Entscheidungen bereits gefallen sind**.
 Wer an diesem Projekt arbeitet (Mensch oder Coding-Agent), hält sich daran. Abweichungen nur nach
 Rücksprache mit dem Projektverantwortlichen (zugleich Datenschutzbeauftragter).
@@ -310,7 +312,7 @@ Die Punkte 1–4 sind in Version 1.0 mit Standardwerten umgesetzt (E15). Ändert
 3. Korrespondent – Standard: nein, der Rechnungssteller wird nur als Feld und im Sidecar geführt.
 4. Eingangsdateien – Standard: nach bestätigtem Upload löschen.
 5. **Konkrete Tag-Namen** – trägt der Verantwortliche in `config.json` ein.
-6. **Scanner-Anbindung** – optional per Samba (`SAMBA=1` im Installer). Der Scanner muss SMB ≥ 2.1 können, Verschlüsselung ist „desired“.
+6. **Scanner-Anbindung** – siehe E55 (WebDAV mit HTTPS über nginx; noch nicht gebaut).
 7. **Validierung des XML** gegen das offizielle Factur-X-XSD bzw. die Schematron steht noch aus.
 8. **Modellvergleich** mit Musterbelegen auf der Ziel-VM (E14) steht noch aus. Werkzeug: `nopaper test --modell-text … --modell-bild …`, Auswertung über `zusammenfassung.csv` je Modell.
 9. **Erkenntnisse aus dem ersten Testbeleg (Bewirtungsbeleg, 2026-11-11)** – in Version 1.1 umgesetzt (a: unscharfe Verankerung + Namenskorrektur im Prompt, b: Regel bleibt, ergänzt um OCR-Verwechslungen O/D→0, c: Müllfilter E19, d: Kategorie `bewirtung` E17):

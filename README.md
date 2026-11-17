@@ -1,5 +1,7 @@
 # nopaper
 
+**Deutsch** | [English](README.en.md)
+
 Vorverarbeitung gescannter Dokumente vor einem **bestehenden [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)**. Läuft vollständig lokal auf einer Debian-VM, ohne Cloud-Dienst und ohne GPU.
 
 - **Rechnungen und Belege** werden erkannt und ausgelesen. Das unveränderte Original geht an paperless, mit festen Tags, sprechendem Titel, geglättetem Volltext und den Rechnungsdaten in benutzerdefinierten Feldern. Dazu entsteht ein Sidecar (CII-XML) mit paperless-ID und SHA-256.
