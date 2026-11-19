@@ -8,6 +8,7 @@ Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` un
 - **Passt der Text trotzdem nicht,** bekommt das Modell Anfang und Ende (Kopfdaten und Summen) statt nur den Anfang. Das Protokoll nennt dazu nur die Zeichenzahlen.
 - **NuExtract im Bild-Modus:** `modelle.nuextract_seiten` wird auf die Zahl der Seitenbilder begrenzt, die in den Kontext passen (etwa 3.500 Token je Seite). Bisher schnitt Ollama stumm ab, wenn mehr Seiten eingestellt waren.
 - Noch nicht an echten langen Rechnungen gemessen.
+- **`BRUTTO_IST_ZWISCHENSUMME` schlägt nicht mehr an, wenn die Steuertabelle den Betrag bestätigt:** Steht der Endbetrag im erkannten Text nur neben „Zwischensumme“ (Kassenbon ohne Summenzeile, Zahlzeile falsch gelesen), ergibt aber die USt-Aufschlüsselung aus Beträgen, die im Text stehen, genau diesen Betrag, gilt er als Endbetrag. Der Übertrag einer mehrseitigen Rechnung wird weiterhin gemeldet.
 
 ## 1.5.2
 

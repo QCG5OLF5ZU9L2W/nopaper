@@ -947,6 +947,29 @@ class RegelTest(unittest.TestCase):
         self.assertEqual(ocr.seiten_auswahl(6, 3), [1, 2, 6])
         self.assertEqual(ocr.seiten_auswahl(2, 3), [1, 2])
 
+    def test_zwischensumme_durch_aufschluesselung_belegt(self):
+        # Kassenbon ohne Summenzeile: der Endbetrag steht im erkannten Text nur neben "Zwischensumme"
+        # (die fett gedruckte Zahlzeile wurde falsch gelesen), die Steuertabelle bestaetigt ihn aber.
+        text = ("2 X Mustergericht 10,70 21,40\n1 X Mustergetraenk 11,90\nZwischensumme *33,30\nKarte x3/, 30\n"
+                "Netto MwSt Brutto\nMwSt. 19% *10,00 *1,90 *11,90\nMwSt. 7% *20,00 *1,40 *21,40\n")
+        vat = [{"rate": Decimal("19"), "basis": Decimal("10.00"), "tax": Decimal("1.90"), "exemption_reason": None},
+               {"rate": Decimal("7"), "basis": Decimal("20.00"), "tax": Decimal("1.40"), "exemption_reason": None}]
+        inv = {"gross": Decimal("33.30"), "vat": vat}
+        self.assertTrue(invoice.brutto_ist_zwischensumme(Decimal("33.30"), text))
+        self.assertTrue(invoice.brutto_durch_aufschluesselung_belegt(inv, text))
+        # Uebertrag einer mehrseitigen Rechnung: die Aufschluesselung ergibt den Endbetrag, nicht den Uebertrag
+        lang = "Übertrag 1.199,90\nNettobetrag 1.239,32\nUmsatzsteuer 19,00 % 235,47\nEndbetrag 1.474,79"
+        v19 = [{"rate": Decimal("19"), "basis": Decimal("1239.32"), "tax": Decimal("235.47"), "exemption_reason": None}]
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("1199.90"), "vat": v19}, lang))
+        # nicht belegt: Betraege der Aufschluesselung stehen nicht im Text (vom Modell passend erfunden)
+        erfunden = [{"rate": Decimal("19"), "basis": Decimal("27.98"), "tax": Decimal("5.32"), "exemption_reason": None}]
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": erfunden}, text))
+        # nicht belegt: nur eine steuerfreie Zeile - deren Basis IST der fragliche Betrag, also kein eigener Beleg
+        frei = [{"rate": Decimal("0"), "basis": Decimal("33.30"), "tax": Decimal("0"), "exemption_reason": None}]
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": frei}, text))
+        # ohne Aufschluesselung bleibt es bei der Pruefung
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": []}, text))
+
     def test_langer_text_fuer_das_modell(self):
         from nopaper import llm
         # Budget waechst mit modelle.kontext, faellt aber nie unter den bisherigen Wert

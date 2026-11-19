@@ -357,6 +357,28 @@ def brutto_ist_zwischensumme(gross: Decimal, text: str) -> bool:
     return all(_ZWISCHEN.search(z) and not _ENDBETRAG.search(_ZWISCHEN.sub("", z)) for z in zeilen)
 
 
+def brutto_durch_aufschluesselung_belegt(inv: dict, text: str) -> bool:
+    """True, wenn die USt-Aufschluesselung den Bruttobetrag unabhaengig bestaetigt: jede Zeile in sich
+    stimmig, alle Netto- und Steuerbetraege stehen im Text, mindestens eine Zeile traegt Steuer, und
+    Netto + Steuer ueber alle Zeilen ergibt genau den Bruttobetrag. Dann ist der Betrag kein Uebertrag,
+    auch wenn er im erkannten Text nur neben 'Zwischensumme' steht (Kassenbon ohne Summenzeile)."""
+    rows = inv.get("vat") or []
+    gross = inv.get("gross")
+    if gross is None or not rows:
+        return False
+    if any(r.get("basis") is None or r.get("tax") is None or r.get("rate") is None for r in rows):
+        return False
+    if not any(r["tax"] > 0 for r in rows):
+        return False
+    if any(abs(r["basis"] * r["rate"] / 100 - r["tax"]) > TOL + Decimal("0.01") for r in rows):
+        return False
+    if abs(sum(r["basis"] + r["tax"] for r in rows) - gross) > TOL:
+        return False
+    flat = re.sub(r"\s+", "", text)
+    return all(any(v in flat for v in amount_variants(r[k]))
+               for r in rows for k in ("basis", "tax") if r[k] != 0)
+
+
 def normalize(raw: dict, buyer_name: str | None) -> dict:
     """LLM-Ausgabe in typisierte, bereinigte Struktur ueberfuehren."""
     s = raw.get("seller") or {}
@@ -475,7 +497,8 @@ def validate(inv: dict, text: str, today: dt.date | None = None) -> list[str]:
         issues.append("RECHNUNGSNUMMER_FALSCHE_BEZEICHNUNG")
     if inv["gross"] is not None and not any(v in flat for v in amount_variants(inv["gross"])):
         issues.append("BRUTTO_NICHT_IM_TEXT")
-    if inv["gross"] is not None and brutto_ist_zwischensumme(inv["gross"], text):
+    if inv["gross"] is not None and brutto_ist_zwischensumme(inv["gross"], text) \
+            and not brutto_durch_aufschluesselung_belegt(inv, text):
         issues.append("BRUTTO_IST_ZWISCHENSUMME")
     if inv["iban"] and inv["iban"] not in re.sub(r"[\s.,]+", "", text).upper():
         issues.append("IBAN_NICHT_IM_TEXT")
