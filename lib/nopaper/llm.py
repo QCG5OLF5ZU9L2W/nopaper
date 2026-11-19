@@ -308,6 +308,8 @@ Bei mahnung, bestellbestaetigung, buchungsbestaetigung, lieferschein, brief, son
 seller ist der Rechnungssteller, nie der Empfaenger. Eingangsstempel ignorieren; massgeblich ist das gedruckte Datum.
 invoice_number: Rechnungs-, Beleg- oder Bonnummer - nicht Kunden-, Auftrags-, Steuer-, Terminal- oder Kassennummer.
 tax_number = Steuernummer (St.-Nr.), vat_id = USt-IdNr.
+Betraege mit dem gedruckten Vorzeichen: steht ein Minus davor oder dahinter (Auszahlung, z.B. Pfandrueckgabe
+groesser als der Einkauf, "zu zahlen -0,77"), sind gross_total, net_total, tax_total und vat_breakdown negativ.
 gross_total = Endbetrag/Rechnungsbetrag, nicht Zwischensumme. net_total und tax_total sind Summen ueber alle
 Steuersaetze; jeder Steuersatz zusaetzlich als Zeile in vat_breakdown. Steuerfrei: rate 0 und Befreiungshinweis.
 Versicherungsteuer ist keine Umsatzsteuer: tax_total 0, rate 0. prepaid = bereits bezahlt (bar, Karte, PayPal),

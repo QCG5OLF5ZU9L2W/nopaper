@@ -970,6 +970,32 @@ class RegelTest(unittest.TestCase):
         # ohne Aufschluesselung bleibt es bei der Pruefung
         self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": []}, text))
 
+    def test_brutto_vorzeichen(self):
+        # Auszahlungsbon: Pfandrueckgabe groesser als der Einkauf, alle Summen mit Minus gedruckt
+        bon = ("Mustergetraenk 2,00 x 2 4,00 B\nPfandrueckgabe -5,23 B\nzu zahlen -1,23\n"
+               "MWST% MWST + Netto = Brutto\nB 19 % -0,20 -1,03 -1,23\nSumme -0,20 -1,03 -1,23\n")
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("1.23"), bon), (3, 0))
+        self.assertTrue(invoice.brutto_vorzeichen_falsch(Decimal("1.23"), bon))     # Modell: positiv -> pruefen
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("-1.23"), bon))   # Modell: wie gedruckt
+        # gewoehnliche Rechnung: positiv gedruckt
+        rechnung = "Nettobetrag 100,00\nUmsatzsteuer 19 % 19,00\nRechnungsbetrag 119,00 EUR\n"
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("119.00"), rechnung))
+        self.assertTrue(invoice.brutto_vorzeichen_falsch(Decimal("-119.00"), rechnung))  # Minus erfunden
+        # Minus hinter dem Betrag (kaufmaennische Schreibweise) zaehlt als negativ, ein Bereich nicht
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("45.00"), "Gutschrift 45,00-\nSumme 45,00 -"), (2, 0))
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("10.00"), "Staffel 10,00-20,00 EUR"), (0, 1))
+        # Bindestrich in Nummern oder Datumsangaben ist kein Vorzeichen des Betrags
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("12.50"), "Beleg 2026-12,50 Summe 12,50"), (0, 2))
+        # Rabattzeile mit gleichem Betrag neben der positiven Summe: unentschieden, keine Meldung
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("50.00"), "Rabatt -50,00\nSumme 50,00"))
+        # Betrag steht gar nicht im Text: Sache der Verankerung, nicht dieser Regel
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("7.77"), bon))
+        # in der Gesamtpruefung: positiv gelesener Auszahlungsbon geht in die Pruefung
+        i = self.inv(gross=Decimal("1.23"), net=Decimal("1.03"), tax=Decimal("0.20"))
+        self.assertIn("BRUTTO_VORZEICHEN", invoice.validate(i, bon))
+        i = self.inv(gross=Decimal("-1.23"), net=Decimal("-1.03"), tax=Decimal("-0.20"))
+        self.assertNotIn("BRUTTO_VORZEICHEN", invoice.validate(i, bon))
+
     def test_langer_text_fuer_das_modell(self):
         from nopaper import llm
         # Budget waechst mit modelle.kontext, faellt aber nie unter den bisherigen Wert

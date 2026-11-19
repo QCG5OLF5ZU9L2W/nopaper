@@ -10,6 +10,8 @@ Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` un
 - Noch nicht an echten langen Rechnungen gemessen.
 - **`BRUTTO_IST_ZWISCHENSUMME` schlägt nicht mehr an, wenn die Steuertabelle den Betrag bestätigt:** Steht der Endbetrag im erkannten Text nur neben „Zwischensumme“ (Kassenbon ohne Summenzeile, Zahlzeile falsch gelesen), ergibt aber die USt-Aufschlüsselung aus Beträgen, die im Text stehen, genau diesen Betrag, gilt er als Endbetrag. Der Übertrag einer mehrseitigen Rechnung wird weiterhin gemeldet.
 
+- **Beträge mit dem gedruckten Vorzeichen:** Ein Auszahlungsbon (z. B. Pfandrückgabe größer als der Einkauf, „zu zahlen −0,77“) wird negativ erfasst. Beide Prompts verlangen das jetzt. Neue Prüfregel `BRUTTO_VORZEICHEN`: Widerspricht das Vorzeichen des gelesenen Bruttobetrags dem Druckbild, geht der Beleg in die Prüfung. Weil sich die Prompts geändert haben, Musterbelege neu messen.
+
 ## 1.5.2
 
 - **Ubuntu LTS neben Debian:** `install.sh` läuft auch auf Ubuntu 24.04 LTS und 26.04 LTS (amd64). Ältere Ubuntu-Fassungen werden abgelehnt, weil ihnen Python ≥ 3.11 fehlt. Fehlt die Paketquelle `universe` (dort liegen `ocrmypdf`, `unpaper` und `tesseract-ocr-deu`), schaltet der Installer sie ein. Noch nicht auf einem echten Ubuntu erprobt.
