@@ -12,6 +12,8 @@ Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` un
 
 - **Beträge mit dem gedruckten Vorzeichen:** Ein Auszahlungsbon (z. B. Pfandrückgabe größer als der Einkauf, „zu zahlen −0,77“) wird negativ erfasst. Beide Prompts verlangen das jetzt. Neue Prüfregel `BRUTTO_VORZEICHEN`: Widerspricht das Vorzeichen des gelesenen Bruttobetrags dem Druckbild, geht der Beleg in die Prüfung. Weil sich die Prompts geändert haben, Musterbelege neu messen.
 
+- **Aktualisieren mit einem Befehl:** `nopaper-aktualisieren` holt den neuen Stand aus dem git-Verzeichnis, aus dem installiert wurde, installiert ihn und startet die laufenden Dienste (auch der Mandanten) neu. `--pruefen` zeigt nur, ob es etwas Neues gibt. Von Hand geänderte Quellen werden nie überschrieben.
+
 ## 1.5.2
 
 - **Ubuntu LTS neben Debian:** `install.sh` läuft auch auf Ubuntu 24.04 LTS und 26.04 LTS (amd64). Ältere Ubuntu-Fassungen werden abgelehnt, weil ihnen Python ≥ 3.11 fehlt. Fehlt die Paketquelle `universe` (dort liegen `ocrmypdf`, `unpaper` und `tesseract-ocr-deu`), schaltet der Installer sie ein. Noch nicht auf einem echten Ubuntu erprobt.

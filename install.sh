@@ -90,6 +90,9 @@ install -m 0755 "$HERE/bin/nopaper" /usr/local/bin/nopaper
 install -m 0755 "$HERE/bin/nopaper-aktivieren" /usr/local/sbin/nopaper-aktivieren
 install -m 0755 "$HERE/bin/nopaper-mandant" /usr/local/sbin/nopaper-mandant
 install -m 0755 "$HERE/bin/nopaper-modell-laden" /usr/local/sbin/nopaper-modell-laden
+install -m 0755 "$HERE/bin/nopaper-aktualisieren" /usr/local/sbin/nopaper-aktualisieren
+# Quellverzeichnis merken, damit nopaper-aktualisieren weiss, woher der neue Stand kommt
+if [[ -d "$HERE/.git" ]]; then printf '%s\n' "$HERE" > /opt/nopaper/quelle; else rm -f /opt/nopaper/quelle; fi
 python3 -I -m compileall -q /opt/nopaper/lib >/dev/null
 
 # --------------------------------------------------------------------- Konfiguration
@@ -204,6 +207,8 @@ Eingang:   $BASE/eingang/rechnungen   $BASE/eingang/dokumente
 Ausgang:   $BASE/ausgang/rechnungsdaten
 Fehler:    $BASE/fehler
 Protokoll: journalctl -u nopaper -f
+
+Spaeter aktualisieren:   nopaper-aktualisieren
 
 Weitere Mandanten (eigener Dienst, eigene Ordner, eigenes paperless):
     nopaper-mandant anlegen <name>      danach: nopaper-aktivieren <name>

@@ -165,16 +165,21 @@ usermod -aG nopaper-eingang BENUTZERNAME
 
 ### 10. Später aktualisieren
 
-Dafür braucht der Server kurz wieder Internetzugang. Die Konfiguration bleibt erhalten.
+Dafür braucht der Server kurz wieder Internetzugang. Konfiguration, Token, Belege und Modelle bleiben erhalten.
 
 ```bash
-cd /root/nopaper
-git pull
-bash install.sh
-nopaper-aktivieren
+nopaper-aktualisieren
 ```
 
-Für jeden Mandanten zusätzlich `nopaper-aktivieren <name>`.
+Der Befehl holt den neuen Stand aus dem Verzeichnis, aus dem installiert wurde (`/root/nopaper`), installiert ihn und startet alle Dienste neu, die schon liefen, auch die der Mandanten. `nopaper-aktualisieren --pruefen` zeigt nur, ob es etwas Neues gibt.
+
+Nicht noch einmal `git clone` ausführen: Das Verzeichnis ist schon da, und der Befehl bricht mit „already exists“ ab.
+
+Gibt es den Befehl noch nicht (Installation vor Version 1.5.3), einmalig von Hand:
+
+```bash
+cd /root/nopaper && git pull && bash install.sh && nopaper-aktivieren
+```
 
 Ein selbstentpackender Installer für Server ohne git lässt sich mit `werkzeuge/installer-bauen.sh` erzeugen.
 

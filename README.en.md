@@ -167,16 +167,21 @@ usermod -aG nopaper-eingang USERNAME
 
 ### 10. Updating later
 
-The server briefly needs internet access again for this. The configuration is kept.
+The server briefly needs internet access again for this. Configuration, token, documents and models are kept.
 
 ```bash
-cd /root/nopaper
-git pull
-bash install.sh
-nopaper-aktivieren
+nopaper-aktualisieren
 ```
 
-For each tenant additionally `nopaper-aktivieren <name>`.
+The command fetches the new state into the directory nopaper was installed from (`/root/nopaper`), installs it and restarts all services that were already running, including those of the tenants. `nopaper-aktualisieren --pruefen` only shows whether there is something new.
+
+Do not run `git clone` again: the directory already exists, and the command stops with "already exists".
+
+If the command does not exist yet (installed before version 1.5.3), once by hand:
+
+```bash
+cd /root/nopaper && git pull && bash install.sh && nopaper-aktivieren
+```
 
 A self-extracting installer for servers without git can be built with `werkzeuge/installer-bauen.sh`.
 
