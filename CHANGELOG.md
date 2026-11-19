@@ -7,6 +7,7 @@ Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` un
 - **Ubuntu LTS neben Debian:** `install.sh` läuft auch auf Ubuntu 24.04 LTS und 26.04 LTS (amd64). Ältere Ubuntu-Fassungen werden abgelehnt, weil ihnen Python ≥ 3.11 fehlt. Fehlt die Paketquelle `universe` (dort liegen `ocrmypdf`, `unpaper` und `tesseract-ocr-deu`), schaltet der Installer sie ein. Noch nicht auf einem echten Ubuntu erprobt.
 - **Netzsperre bei Ubuntu:** Dort geben nopaper und Ollama statt `localhost` (127.0.0.0/8) nur `127.0.0.1` und `::1` frei, weil unter `127.0.0.53` der DNS-Dienst `systemd-resolved` lauscht; der Dienst soll keinen DNS-Server erreichen (E47).
 - Auf Debian ändert sich nichts.
+- **README:** Installation Schritt für Schritt, vom frisch installierten Server (Anmelden als root, `git clone`) bis zum ersten Beleg und zur späteren Aktualisierung.
 
 ## 1.5.1
 

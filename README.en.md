@@ -32,17 +32,153 @@ Decisions and rules are recorded in [`AGENTS.md`](AGENTS.md) (German). They are 
 
 There are no dependencies apart from distribution packages (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`; on Ubuntu from the `universe` component) and Ollama. The code uses only the Python standard library.
 
-## Installation
+## Installation step by step
 
-As root, in the unpacked directory:
+The whole way from a freshly installed server to the first document. The commands can be copied as they stand. Only in step 4 do you put in your own values.
+
+You need: a server with Debian 12/13 or Ubuntu 24.04/26.04 (see Requirements), internet access for the installation, the address of your paperless-ngx and an administrator account there.
+
+### 1. Log in as root
+
+All following commands run as root. On Ubuntu, and on Debian with `sudo`:
 
 ```bash
+sudo -i
+```
+
+On Debian without `sudo`:
+
+```bash
+su -
+```
+
+### 2. Update the system and install git
+
+```bash
+apt-get update
+apt-get -y upgrade
+apt-get -y install git ca-certificates
+```
+
+### 3. Download nopaper
+
+```bash
+cd /root
+git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git
+cd /root/nopaper
+```
+
+The folder `/root/nopaper` then holds the sources. The program itself goes to `/opt/nopaper` in the next step.
+
+### 4. Install
+
+Replace the address with that of your paperless and the name with the invoice recipient printed on your documents:
+
+```bash
+cd /root/nopaper
 PAPERLESS_URL=https://paperless.example.org EMPFAENGER="Example Ltd" bash install.sh
 ```
 
-The script installs the packages, Ollama with the models named in the configuration (several GB) and nopaper as a systemd service. The service is not started yet. After the models have been pulled, Ollama is restricted to localhost.
+The script installs the packages, Ollama with the language models (several GB, which takes a while depending on the connection) and nopaper as a systemd service. The service is not started yet. After the models have been pulled, Ollama is restricted to localhost. The two values apply to the default instance; further tenants are created later (see [Tenants](#tenants)).
 
-A self-extracting installer can be built with `werkzeuge/installer-bauen.sh`.
+At the end it prints `nopaper ist installiert.` Check that the models are there:
+
+```bash
+ollama list
+```
+
+### 5. Trial run without paperless (optional)
+
+Only with sample documents, never with real ones. Put one or more PDFs into a folder, for example `/root/muster`, and run:
+
+```bash
+nopaper test /root/muster/
+ls /srv/nopaper/test/ergebnis/
+nopaper test --aufraeumen
+```
+
+### 6. Prepare paperless
+
+This is done in the web interface of paperless, not on the server. nopaper creates nothing there.
+
+1. Create a **user** `nopaper` without admin rights. Permissions: view, add and change documents; view tags, custom fields and tasks. No delete permission.
+2. Create the **tags**, each with matching "None": `Rechnung`, `Eingangsrechnung`, `Scan`, `nopaper prüfen`, `nopaper Rechnung`, `totext`, `Bewirtung`, `Kassenbon`, `Versicherung`, `Behörde`.
+3. Create the **custom fields**:
+
+| Field name | Data type |
+|---|---|
+| `Erkannt: Belegart`, `Erkannt: Rechnungsnummer`, `Erkannt: Rechnungssteller`, `Erkannt: Skonto`, `Erkannt: Verwendungszweck`, `IBAN` | Text |
+| `Erkannt: Rechnungsdatum`, `Zahlungsziel` | Date |
+| `Erkannt: Betrag brutto`, `Erkannt: Betrag netto`, `Erkannt: Steuer_High`, `Erkannt: Steuer_Low`, `Erkannt: Zahlbetrag` | Monetary |
+
+4. Create an **API token** for the user `nopaper` (in the admin interface of paperless under "Tokens") and copy it.
+
+These are the names from the configuration that ships with nopaper. If you want other names or fewer fields, change them in step 7. Details are under [Setting up paperless](#setting-up-paperless).
+
+### 7. Enter the token and the configuration
+
+Store the token. The command asks for the token; nothing is shown when you paste it, and the token does not end up in the command history:
+
+```bash
+read -rsp "Token: " T && printf '%s\n' "$T" > /etc/nopaper/paperless.token; unset T; echo
+```
+
+You only need to open the configuration if your tags or fields have other names than in step 6, or if you did not give the address and recipient in step 4:
+
+```bash
+nano /etc/nopaper/config.json
+```
+
+Save with `Ctrl+O`, `Enter`, quit with `Ctrl+X`.
+
+### 8. Check and start
+
+```bash
+nopaper check
+```
+
+`nopaper check` names missing tags, fields and models. Only when nothing is missing any more:
+
+```bash
+nopaper-aktivieren
+```
+
+The command allows only the paperless host in the service, checks once more and starts the service.
+
+### 9. The first document
+
+Follow the log in a second window:
+
+```bash
+journalctl -u nopaper -f
+```
+
+Put an invoice as a PDF into the incoming folder (adjust the path):
+
+```bash
+cp /root/muster/rechnung.pdf /srv/nopaper/eingang/rechnungen/
+```
+
+After a few minutes the document appears in paperless with tags, title and fields. Other scans belong in `/srv/nopaper/eingang/dokumente/`. If another user of the server is to drop scans, add them to the group:
+
+```bash
+usermod -aG nopaper-eingang USERNAME
+```
+
+### 10. Updating later
+
+The server briefly needs internet access again for this. The configuration is kept.
+
+```bash
+cd /root/nopaper
+git pull
+bash install.sh
+nopaper-aktivieren
+```
+
+For each tenant additionally `nopaper-aktivieren <name>`.
+
+A self-extracting installer for servers without git can be built with `werkzeuge/installer-bauen.sh`.
 
 ## Setting up paperless
 
