@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# nopaper – Installation auf einer frischen Debian-VM (12 "bookworm" / 13 "trixie"), amd64, nur CPU.
+# nopaper – Installation auf einem frischen Debian (12 "bookworm" / 13 "trixie") oder
+# Ubuntu LTS (24.04 / 26.04), amd64. Eine GPU ist nicht noetig.
 #
 #   bash install.sh          (als root)
 #
@@ -22,19 +23,46 @@ die() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "bitte als root ausfuehren (als root: bash install.sh)"
 . /etc/os-release
-[[ "$ID" == "debian" ]] || die "nur fuer Debian gedacht (gefunden: $ID)"
+OS_ID="${ID:-unbekannt}"
+OS_VERSION="${VERSION_ID:-}"
+case "$OS_ID" in
+  debian) OS_NAME=Debian; LOKAL="localhost" ;;
+  ubuntu) OS_NAME=Ubuntu
+          # Bei Ubuntu lauscht unter 127.0.0.53 der DNS-Dienst systemd-resolved. "localhost"
+          # (= 127.0.0.0/8) gaebe ihn frei; die Dienste sollen keinen DNS-Server erreichen (E47).
+          LOKAL="127.0.0.1 ::1"
+          # aeltere Ubuntu-Fassungen bringen kein Python >= 3.11 mit
+          dpkg --compare-versions "${OS_VERSION:-0}" ge 24.04 \
+            || die "Ubuntu ${OS_VERSION:-?} ist zu alt – noetig ist 24.04 LTS oder neuer"
+          [[ "$OS_VERSION" == "24.04" || "$OS_VERSION" == "26.04" ]] \
+            || echo "WARNUNG: Ubuntu $OS_VERSION ist nicht vorgesehen (vorgesehen: 24.04, 26.04) – Installation laeuft trotzdem weiter." ;;
+  *) die "nur fuer Debian und Ubuntu gedacht (gefunden: $OS_ID)" ;;
+esac
 [[ "$(dpkg --print-architecture)" == "amd64" ]] || die "nur amd64 vorgesehen"
 MEM_GB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))
 (( MEM_GB >= 14 )) || echo "WARNUNG: nur ${MEM_GB} GB RAM – empfohlen sind 16–24 GB."
 (( $(nproc) >= 6 )) || echo "WARNUNG: nur $(nproc) CPU-Kerne – empfohlen sind 8."
 
 # --------------------------------------------------------------------- Pakete
-log "Debian-Pakete installieren (OCR, Python, Werkzeuge)"
+log "$OS_NAME-Pakete installieren (OCR, Python, Werkzeuge)"
 export DEBIAN_FRONTEND=noninteractive
+PAKETE=(python3 ocrmypdf tesseract-ocr tesseract-ocr-deu unpaper ghostscript poppler-utils
+        ca-certificates curl zstd)
 apt-get update
-apt-get install -y --no-install-recommends \
-  python3 ocrmypdf tesseract-ocr tesseract-ocr-deu unpaper ghostscript poppler-utils \
-  ca-certificates curl zstd
+if [[ "$OS_ID" == "ubuntu" ]]; then
+  export NEEDRESTART_SUSPEND=1   # Ubuntu Server: keine Rueckfrage zu Dienst-Neustarts
+  # ocrmypdf, unpaper und tesseract-ocr-deu liegen bei Ubuntu in der Komponente "universe"
+  FEHLT=""
+  for p in "${PAKETE[@]}"; do apt-cache show "$p" >/dev/null 2>&1 || FEHLT+=" $p"; done
+  if [[ -n "$FEHLT" ]]; then
+    log "Paketquelle 'universe' einschalten (nicht gefunden:$FEHLT)"
+    command -v add-apt-repository >/dev/null \
+      || die "Pakete nicht gefunden:$FEHLT – bitte die Komponente 'universe' in den Paketquellen einschalten und install.sh erneut starten"
+    add-apt-repository -y universe
+    apt-get update
+  fi
+fi
+apt-get install -y --no-install-recommends "${PAKETE[@]}"
 python3 -c 'import sys; assert sys.version_info >= (3, 11)' || die "Python >= 3.11 erforderlich"
 
 # --------------------------------------------------------------------- Benutzer & Verzeichnisse
@@ -114,10 +142,10 @@ fi
 
 if [[ "$LOCK_OLLAMA" == "1" ]]; then
   log "Ollama auf localhost beschraenken (danach kein Internetzugriff mehr)"
-  cat > /etc/systemd/system/ollama.service.d/20-netlock.conf <<'EOF'
+  cat > /etc/systemd/system/ollama.service.d/20-netlock.conf <<EOF
 [Service]
 IPAddressDeny=any
-IPAddressAllow=localhost
+IPAddressAllow=$LOKAL
 EOF
   systemctl daemon-reload
   systemctl restart ollama
@@ -127,6 +155,19 @@ fi
 log "systemd-Dienst einrichten (noch nicht gestartet)"
 install -m 0644 "$HERE/systemd/nopaper.service" /etc/systemd/system/nopaper.service
 install -m 0644 "$HERE/systemd/nopaper@.service" /etc/systemd/system/nopaper@.service
+if [[ "$OS_ID" == "ubuntu" ]]; then
+  # Netzfreigabe der Dienstdateien (localhost) durch die engere ersetzen. Die leere Zeile leert die
+  # Liste; 05 steht vor 10-paperless.conf, die Freigaben von nopaper-aktivieren kommen also dazu.
+  for d in nopaper.service.d nopaper@.service.d; do
+    install -d "/etc/systemd/system/$d"
+    cat > "/etc/systemd/system/$d/05-ubuntu.conf" <<EOF
+# Ubuntu: nur $LOKAL statt localhost (127.0.0.0/8), damit systemd-resolved (127.0.0.53) gesperrt bleibt (E47)
+[Service]
+IPAddressAllow=
+IPAddressAllow=$LOKAL
+EOF
+  done
+fi
 systemctl daemon-reload
 
 cat <<EOF

@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.5.2
+
+- **Ubuntu LTS neben Debian:** `install.sh` läuft auch auf Ubuntu 24.04 LTS und 26.04 LTS (amd64). Ältere Ubuntu-Fassungen werden abgelehnt, weil ihnen Python ≥ 3.11 fehlt. Fehlt die Paketquelle `universe` (dort liegen `ocrmypdf`, `unpaper` und `tesseract-ocr-deu`), schaltet der Installer sie ein. Noch nicht auf einem echten Ubuntu erprobt.
+- **Netzsperre bei Ubuntu:** Dort geben nopaper und Ollama statt `localhost` (127.0.0.0/8) nur `127.0.0.1` und `::1` frei, weil unter `127.0.0.53` der DNS-Dienst `systemd-resolved` lauscht; der Dienst soll keinen DNS-Server erreichen (E47).
+- Auf Debian ändert sich nichts.
+
 ## 1.5.1
 
 - **Selbst signierte Zertifikate für kumero:** neuer optionaler Schlüssel `kumero.ca_datei`. Das dort hinterlegte Zertifikat (selbst signiert oder interne CA) gilt als vertrauenswürdig. Die Prüfung bleibt immer an; ein nicht hinterlegtes Zertifikat wird abgelehnt.

@@ -8,11 +8,14 @@ set -euo pipefail
 [[ $# -ge 1 ]] || { echo "Aufruf: nopaper-modell-laden <modell> [<modell> ...]" >&2; exit 1; }
 
 SPERRE=/etc/systemd/system/ollama.service.d/20-netlock.conf
+# Ubuntu: nicht "localhost" (127.0.0.0/8), dort lauscht unter 127.0.0.53 systemd-resolved (E47)
+LOKAL="localhost"
+[[ "$(. /etc/os-release && echo "${ID:-}")" == "ubuntu" ]] && LOKAL="127.0.0.1 ::1"
 sperren() {
-  cat > "$SPERRE" <<'EOF'
+  cat > "$SPERRE" <<EOF
 [Service]
 IPAddressDeny=any
-IPAddressAllow=localhost
+IPAddressAllow=$LOKAL
 EOF
   systemctl daemon-reload
   systemctl restart ollama

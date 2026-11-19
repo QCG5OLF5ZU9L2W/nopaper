@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nopaper – selbstentpackender Installer fuer ein frisches Debian (12/13, amd64)
+# nopaper – selbstentpackender Installer fuer ein frisches Debian (12/13) oder Ubuntu LTS (24.04/26.04), amd64
 #
 #   PAPERLESS_URL=https://paperless.example.org EMPFAENGER="Klinik Muster GmbH" bash nopaper-installer.sh   (als root)
 #

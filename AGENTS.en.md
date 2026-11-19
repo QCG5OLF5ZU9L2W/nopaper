@@ -8,7 +8,7 @@ This file records **what** is being built and **which decisions have already bee
 Anyone working on this project (human or coding agent) follows it. Deviations only after
 consulting the project owner (who is also the data protection officer).
 
-As of: 2026-11-17 (version 1.5.1; learning from bookings per E37, E39 not built yet; E40–E44 built in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9; E54 built in 1.4.10, E56 in 1.5.0; E51–E53, E55 decided, not built yet)
+As of: 2026-11-19 (version 1.5.2; learning from bookings per E37, E39 not built yet; E40–E44 built in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9; E54 built in 1.4.10, E56 in 1.5.0, E57 in 1.5.2; E51–E53, E55 decided, not built yet)
 
 ---
 
@@ -26,7 +26,7 @@ As of: 2026-11-17 (version 1.5.1; learning from bookings per E37, E39 not built 
 | Item | Requirement |
 |---|---|
 | Data | Contains data under **Art. 9 GDPR** ⇒ processing **strictly local**. No cloud service, no external API, no telemetry. |
-| Hardware | Debian VM (12/13, amd64), **CPU only, no GPU**. Guideline: 8 vCPUs, 16–24 GB RAM. |
+| Hardware | Debian (12/13) or Ubuntu LTS (24.04/26.04, E57), amd64, as a VM or directly on the machine. Designed for **CPU only, no GPU**. Guideline: 8 vCPUs, 16–24 GB RAM. |
 | Volume | **about 50 documents per day at most** |
 | paperless | **already exists** and is not installed by nopaper. Access only through the REST API (HTTPS). |
 | Network | nopaper talks only to localhost (Ollama), the paperless host and – only if configured – the host of the accounting software kumero (E56). Internet only during installation. |
@@ -80,6 +80,7 @@ Second path – post-processing:
 | E13 | **No line items** are read, because that is where the Art. 9 content would be. |
 | E14 | **Models** (as of 11/2026): text `qwen3.5:9b`, vision fallback `qwen3-vl:8b-instruct`. **Switch off thinking mode** (`think: false`). Ollama loads only one model at a time (`OLLAMA_MAX_LOADED_MODELS=1`). Before production use, a comparison with 20–30 sample documents. |
 | E15 | Defaults in version 1.0 (changeable through the configuration): **only XML files** go into the batch folder. nopaper **keeps no copy** of the sidecars, the pickup deletes them. The seller does **not become a correspondent** but a field. The incoming file is **deleted** after a confirmed upload. |
+| E57 | **Ubuntu LTS is supported alongside Debian** (decided 2026-11-19, built in 1.5.2; changes the constraint "Hardware"). `install.sh` accepts Ubuntu 24.04/26.04 in addition to Debian; older Ubuntu releases are rejected (no Python ≥ 3.11), other Ubuntu releases run with a warning. On Ubuntu, `ocrmypdf`, `unpaper` and `tesseract-ocr-deu` are in the `universe` component; if it is missing, the installer enables it. **Network lock tighter on Ubuntu only:** there the services (nopaper and Ollama) allow only `127.0.0.1` and `::1` instead of `localhost` (= 127.0.0.0/8), because the DNS service `systemd-resolved` listens on `127.0.0.53` and the service could otherwise reach a DNS server, contrary to E47. Implementation: the unit files stay unchanged; on Ubuntu the installer places `05-ubuntu.conf` next to the allowance written by `nopaper-aktivieren` and writes the Ollama lock accordingly. Consequence on Ubuntu: Ollama must be reachable at `127.0.0.1` or `::1` (the default). **The Debian path stays unchanged.** The decisions on models and the GPU (E2, E14) are not affected. **Not yet tried on a real Ubuntu.** |
 | E16 | Newly uploaded documents should not belong to the API user. nopaper therefore sets `owner` and permissions according to `dokumentrechte` in the configuration. Default: no owner, which matches an import through the paperless consume folder. For existing documents (post-processing) owner and permissions stay unchanged. |
 | E17 | **Classification and invoice data in one model call** (saves about 40 s per document on CPU). Categories: `rechnung`, `gutschrift`, `kassenbon`, `bewirtung`, `versicherung`, `behoerde` (invoice-like) and `mahnung`, `bestellbestaetigung`, `buchungsbestaetigung`, `lieferschein`, `brief`, `sonstiges`. Additional tags per category through `kategorie_tags`. |
 | E18 | **Digital PDFs** (real text layer, no page-filling scan images) are not recognised again; their text layer is used. Scans: ocrmypdf, then text **with layout** (`pdftotext -layout`) so that label and value stay on one line. |
@@ -223,7 +224,7 @@ The current example is `config.example.json` in the repository. Keys and values 
 
 ## 9. Security and data protection – obligations for every implementation
 
-- **No network traffic** except to `127.0.0.1` (Ollama), to the paperless host and – if configured – to the kumero host (E56). Enforced with systemd `IPAddressDeny=any` with `IPAddressAllow=localhost` and the IP(s) of paperless. Ollama is bound to `127.0.0.1` and locked after the model download.
+- **No network traffic** except to `127.0.0.1` (Ollama), to the paperless host and – if configured – to the kumero host (E56). Enforced with systemd `IPAddressDeny=any` with `IPAddressAllow=localhost` (on Ubuntu only `127.0.0.1 ::1`, E57) and the IP(s) of paperless. Ollama is bound to `127.0.0.1` and locked after the model download.
 - **TLS with certificate validation**. TLS validation must never be switched off. An internal CA is specified with `ca_datei`.
 - **Logs with metadata only**: document ID, file name of the incoming file, status, check codes, run time. **Never** log OCR text, invoice data, names or amounts, not even in debug mode or in exceptions.
 - **No permanent copies** of documents or text on nopaper. Temporary data only in the private working directory (`PrivateTmp`), deleted after every pass.
@@ -244,7 +245,7 @@ With 50 documents per day this is roughly 2–3 h of computing time. Processing 
 
 ## 11. Conventions for the implementation
 
-- **Python ≥ 3.11, standard library only.** System tools through Debian packages: `ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`. No `pip install` on the target VM.
+- **Python ≥ 3.11, standard library only.** System tools through distribution packages (Debian, Ubuntu): `ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`. No `pip install` on the target VM.
 - One service `nopaper.service` with a main loop: watch the incoming folders (polling is enough), then work through the queue and poll the post-processing tag.
 - **Idempotent**: every step can be resumed after a crash. The keys are the SHA-256 of the original and the paperless ID. An upload must never happen twice. Therefore the status is persisted before the upload, and before the next attempt the task ID or the paperless checksum is checked.
 - **Error classes**: temporary errors (network, 5xx, Ollama) are retried with backoff, permanent errors lead to `fehler/` after 5 attempts.
@@ -295,7 +296,7 @@ Items 1–4 are implemented with defaults in version 1.0 (E15). If the owner cha
 
 Result: NuExtract in image mode is on a par with qwen, and probably better with the corrections from 1.4 (E30–E32). Text mode is weaker (a postal receipt as a letter, a petrol receipt as a credit note). On CPU image mode is slower than text; with a GPU this does not matter. All values come from the training set; an independent test set is pending.
 
-## 13. Code layout (version 1.5.1)
+## 13. Code layout (version 1.5.2)
 
 | File | Content |
 |---|---|

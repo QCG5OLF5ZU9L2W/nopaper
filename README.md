@@ -2,7 +2,7 @@
 
 **Deutsch** | [English](README.en.md)
 
-Vorverarbeitung gescannter Dokumente vor einem **bestehenden [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)**. Läuft vollständig lokal auf einer Debian-VM, ohne Cloud-Dienst und ohne GPU.
+Vorverarbeitung gescannter Dokumente vor einem **bestehenden [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)**. Läuft vollständig lokal auf einer Maschine mit Debian oder Ubuntu, ohne Cloud-Dienst; eine GPU ist nicht nötig.
 
 - **Rechnungen und Belege** werden erkannt und ausgelesen. Das unveränderte Original geht an paperless, mit festen Tags, sprechendem Titel, geglättetem Volltext und den Rechnungsdaten in benutzerdefinierten Feldern. Dazu entsteht ein Sidecar (CII-XML) mit paperless-ID und SHA-256.
 - **Sonstige Scans** gehen an paperless und bekommen einen geglätteten Volltext.
@@ -24,11 +24,11 @@ Entscheidungen und Regeln stehen in [`AGENTS.md`](AGENTS.md). Sie sind verbindli
 
 ## Voraussetzungen
 
-- Debian 12 oder 13 (amd64), 8 vCPU, 16–24 GB RAM, 60 GB Platte (verschlüsselt empfohlen)
+- Debian 12 oder 13 oder Ubuntu 24.04 LTS oder 26.04 LTS (amd64), 8 vCPU, 16–24 GB RAM, 60 GB Platte (verschlüsselt empfohlen)
 - ein laufendes paperless-ngx, erreichbar per HTTPS
 - Internet nur während der Installation (Pakete, Ollama, Modelle)
 
-Außer Debian-Paketen (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`) und Ollama gibt es keine Abhängigkeiten. Der Code nutzt nur die Python-Standardbibliothek.
+Außer Paketen der Distribution (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`; bei Ubuntu aus der Komponente `universe`) und Ollama gibt es keine Abhängigkeiten. Der Code nutzt nur die Python-Standardbibliothek.
 
 ## Installation
 

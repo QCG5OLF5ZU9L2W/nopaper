@@ -2,7 +2,7 @@
 
 [Deutsch](README.md) | **English**
 
-Pre-processing for scanned documents in front of an **existing [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)** instance. Runs entirely locally on a Debian VM, with no cloud service and no GPU.
+Pre-processing for scanned documents in front of an **existing [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)** instance. Runs entirely locally on a machine with Debian or Ubuntu, with no cloud service; no GPU is needed.
 
 - **Invoices and receipts** are recognised and read. The unmodified original goes to paperless with fixed tags, a descriptive title, a cleaned-up full text and the invoice data in custom fields. A sidecar file (CII XML) with the paperless ID and SHA-256 is written as well.
 - **Other scans** go to paperless and get a cleaned-up full text.
@@ -26,11 +26,11 @@ Decisions and rules are recorded in [`AGENTS.md`](AGENTS.md) (German). They are 
 
 ## Requirements
 
-- Debian 12 or 13 (amd64), 8 vCPUs, 16–24 GB RAM, 60 GB disk (encryption recommended)
+- Debian 12 or 13, or Ubuntu 24.04 LTS or 26.04 LTS (amd64), 8 vCPUs, 16–24 GB RAM, 60 GB disk (encryption recommended)
 - a running paperless-ngx, reachable over HTTPS
 - internet access only during installation (packages, Ollama, models)
 
-There are no dependencies apart from Debian packages (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`) and Ollama. The code uses only the Python standard library.
+There are no dependencies apart from distribution packages (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`; on Ubuntu from the `universe` component) and Ollama. The code uses only the Python standard library.
 
 ## Installation
 
