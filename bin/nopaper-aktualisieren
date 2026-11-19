@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Aktualisiert nopaper aus dem git-Verzeichnis, aus dem es installiert wurde (als root):
-#   nopaper-aktualisieren              holt den neuen Stand, installiert ihn, startet die Dienste neu
+#   nopaper-aktualisieren              holt den neuen Stand und startet install.sh (Dienste werden neu gestartet)
 #   nopaper-aktualisieren --pruefen    zeigt nur, ob es einen neueren Stand gibt
 #   nopaper-aktualisieren --erzwingen  installiert auch dann neu, wenn der Stand schon aktuell ist
 # Konfiguration, Token, Belege und Modelle bleiben unveraendert. Braucht Internet (git, Pakete).
@@ -44,27 +44,6 @@ else
 fi
 [[ "$MODUS" == "--pruefen" ]] && exit 0
 
-# Modelle sind schon geladen; die Konfiguration bleibt, also auch die Modellnamen darin
-SKIP_MODELS=1 bash "$QUELLE/install.sh" >/tmp/nopaper-aktualisieren.log 2>&1 || {
-  echo "Installation fehlgeschlagen – Ausgabe in /tmp/nopaper-aktualisieren.log" >&2; exit 1; }
-echo "==> Version $(version /opt/nopaper/lib/nopaper/__init__.py) installiert"
-
-# nur Dienste neu starten, die schon eingeschaltet waren; nopaper-aktivieren prueft vorher
-FEHLER=0
-if systemctl is-enabled --quiet nopaper 2>/dev/null; then
-  echo "==> Standard-Instanz"
-  nopaper-aktivieren || FEHLER=1
-fi
-for d in /etc/nopaper-mandanten/*/; do
-  [[ -f "${d}config.json" ]] || continue
-  n="$(basename "$d")"
-  if systemctl is-enabled --quiet "nopaper@$n" 2>/dev/null; then
-    echo "==> Mandant $n"
-    nopaper-aktivieren "$n" || FEHLER=1
-  fi
-done
-if [[ $FEHLER -ne 0 ]]; then
-  echo "Aktualisiert, aber mindestens ein Dienst wurde NICHT gestartet (siehe oben)." >&2
-  exit 1
-fi
-echo "Fertig. Aenderungen: $QUELLE/CHANGELOG.md"
+# Modelle sind schon geladen; die Konfiguration bleibt, also auch die Modellnamen darin.
+# install.sh erkennt die vorhandene Installation und startet die eingeschalteten Dienste selbst neu.
+SKIP_MODELS=1 exec bash "$QUELLE/install.sh"

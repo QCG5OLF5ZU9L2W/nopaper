@@ -64,11 +64,11 @@ apt-get -y install git ca-certificates
 
 ```bash
 cd /root
-git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git
+if [ -d nopaper/.git ]; then git -C nopaper pull --ff-only; else git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git; fi
 cd /root/nopaper
 ```
 
-The folder `/root/nopaper` then holds the sources. The program itself goes to `/opt/nopaper` in the next step.
+The folder `/root/nopaper` then holds the sources. The program itself goes to `/opt/nopaper` in the next step. If the folder already exists, the command only fetches the new state; steps 3 and 4 can therefore be repeated at any time.
 
 ### 4. Install
 
@@ -80,6 +80,8 @@ PAPERLESS_URL=https://paperless.example.org EMPFAENGER="Example Ltd" bash instal
 ```
 
 The script installs the packages, Ollama with the language models (several GB, which takes a while depending on the connection) and nopaper as a systemd service. The service is not started yet. After the models have been pulled, Ollama is restricted to localhost. The two values apply to the default instance; further tenants are created later (see [Tenants](#tenants)).
+
+On an existing installation the same call updates the program: configuration, token and documents are kept, the two values are no longer needed, and the services that were already running are restarted.
 
 At the end it prints `nopaper ist installiert.` Check that the models are there:
 
@@ -173,14 +175,12 @@ The server briefly needs internet access again for this. Configuration, token, d
 nopaper-aktualisieren
 ```
 
-The command fetches the new state into the directory nopaper was installed from (`/root/nopaper`), installs it and restarts all services that were already running, including those of the tenants. `nopaper-aktualisieren --pruefen` only shows whether there is something new.
+The command fetches the new state into the directory nopaper was installed from (`/root/nopaper`) and runs `install.sh` there. That recognises the existing installation and restarts all services that were already running, including those of the tenants. `nopaper-aktualisieren --pruefen` only shows whether there is something new.
 
-Do not run `git clone` again: the directory already exists, and the command stops with "already exists".
-
-If the command does not exist yet (installed before version 1.5.3), once by hand:
+Repeating steps 3 and 4 does the same. If the command does not exist yet (installed before version 1.5.3), once like this:
 
 ```bash
-cd /root/nopaper && git pull && bash install.sh && nopaper-aktivieren
+cd /root/nopaper && git pull --ff-only && bash install.sh
 ```
 
 A self-extracting installer for servers without git can be built with `werkzeuge/installer-bauen.sh`.

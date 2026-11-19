@@ -5,6 +5,9 @@
 #
 #   bash install.sh          (als root)
 #
+# Derselbe Aufruf aktualisiert eine vorhandene Installation: Konfiguration, Token und Belege bleiben,
+# und die Dienste, die schon eingeschaltet waren, werden am Ende neu gestartet.
+#
 # Optional vorab setzen:
 #   PAPERLESS_URL=https://paperless.intern   EMPFAENGER="Klinik Muster GmbH"
 #   LOCK_OLLAMA=1    Ollama nach dem Modell-Download auf localhost einsperren (Standard: 1)
@@ -17,6 +20,8 @@ EMPFAENGER="${EMPFAENGER:-}"
 LOCK_OLLAMA="${LOCK_OLLAMA:-1}"
 SKIP_MODELS="${SKIP_MODELS:-0}"
 BASE=/srv/nopaper
+# Gibt es das Programm schon, ist dieser Lauf eine Aktualisierung
+UPDATE=0; [[ -f /opt/nopaper/nopaper.py ]] && UPDATE=1
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
@@ -155,7 +160,7 @@ EOF
 fi
 
 # --------------------------------------------------------------------- systemd
-log "systemd-Dienst einrichten (noch nicht gestartet)"
+if [[ $UPDATE -eq 1 ]]; then log "systemd-Dienst aktualisieren"; else log "systemd-Dienst einrichten (noch nicht gestartet)"; fi
 install -m 0644 "$HERE/systemd/nopaper.service" /etc/systemd/system/nopaper.service
 install -m 0644 "$HERE/systemd/nopaper@.service" /etc/systemd/system/nopaper@.service
 if [[ "$OS_ID" == "ubuntu" ]]; then
@@ -173,10 +178,43 @@ EOF
 fi
 systemctl daemon-reload
 
+VERSION="$(python3 -I -c 'import re,sys;print(re.search(r"VERSION = \"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' /opt/nopaper/lib/nopaper/__init__.py)"
+
+# --------------------------------------------------------------------- Aktualisierung: Dienste neu starten
+if [[ $UPDATE -eq 1 ]]; then
+  # Nur Dienste, die schon eingeschaltet waren. nopaper-aktivieren prueft vorher und startet nur,
+  # wenn die Pruefung besteht.
+  FEHLER=0; GESTARTET=0
+  if systemctl is-enabled --quiet nopaper 2>/dev/null; then
+    log "Standard-Instanz neu starten"
+    if nopaper-aktivieren; then GESTARTET=$((GESTARTET + 1)); else FEHLER=1; fi
+  fi
+  for d in /etc/nopaper-mandanten/*/; do
+    [[ -f "${d}config.json" ]] || continue
+    n="$(basename "$d")"
+    if systemctl is-enabled --quiet "nopaper@$n" 2>/dev/null; then
+      log "Mandant $n neu starten"
+      if nopaper-aktivieren "$n"; then GESTARTET=$((GESTARTET + 1)); else FEHLER=1; fi
+    fi
+  done
+  echo
+  echo "====================================================================="
+  echo "nopaper ist auf Version $VERSION aktualisiert."
+  echo "Konfiguration, Token und Belege sind unveraendert. Neu gestartete Dienste: $GESTARTET"
+  [[ $GESTARTET -eq 0 && $FEHLER -eq 0 ]] && echo "Es war noch kein Dienst eingeschaltet – starten mit: nopaper-aktivieren"
+  echo "Aenderungen: $HERE/CHANGELOG.md        Naechstes Update: nopaper-aktualisieren"
+  echo "====================================================================="
+  if [[ $FEHLER -ne 0 ]]; then
+    echo "ACHTUNG: Mindestens ein Dienst wurde NICHT gestartet (siehe oben). Fehler beheben, dann nopaper-aktivieren." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
 cat <<EOF
 
 =====================================================================
-nopaper ist installiert. (Alle Befehle als root ausfuehren.)
+nopaper $VERSION ist installiert. (Alle Befehle als root ausfuehren.)
 
 Testen OHNE paperless (nur Musterbelege!):
     nopaper test /pfad/zu/musterbelegen/          # oder einzelne PDFs

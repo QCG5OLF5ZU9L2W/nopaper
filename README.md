@@ -62,11 +62,11 @@ apt-get -y install git ca-certificates
 
 ```bash
 cd /root
-git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git
+if [ -d nopaper/.git ]; then git -C nopaper pull --ff-only; else git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git; fi
 cd /root/nopaper
 ```
 
-Der Ordner `/root/nopaper` enthält danach die Quellen. Das Programm selbst landet im nächsten Schritt unter `/opt/nopaper`.
+Der Ordner `/root/nopaper` enthält danach die Quellen. Das Programm selbst landet im nächsten Schritt unter `/opt/nopaper`. Ist der Ordner schon da, holt der Befehl nur den neuen Stand; die Schritte 3 und 4 lassen sich deshalb jederzeit wiederholen.
 
 ### 4. Installieren
 
@@ -78,6 +78,8 @@ PAPERLESS_URL=https://paperless.example.org EMPFAENGER="Muster GmbH" bash instal
 ```
 
 Das Skript installiert die Pakete, Ollama mit den Sprachmodellen (mehrere GB, das dauert je nach Leitung eine Weile) und nopaper als systemd-Dienst. Der Dienst wird noch nicht gestartet. Ollama wird nach dem Laden der Modelle auf localhost beschränkt. Die beiden Angaben gelten für die Standard-Instanz; weitere Mandanten legst du später an (siehe [Mandanten](#mandanten)).
+
+Auf einer vorhandenen Installation aktualisiert derselbe Aufruf das Programm: Konfiguration, Token und Belege bleiben, die beiden Angaben werden nicht mehr gebraucht, und die Dienste, die schon liefen, werden neu gestartet.
 
 Am Ende steht `nopaper ist installiert.` Prüfen, ob die Modelle da sind:
 
@@ -171,14 +173,12 @@ Dafür braucht der Server kurz wieder Internetzugang. Konfiguration, Token, Bele
 nopaper-aktualisieren
 ```
 
-Der Befehl holt den neuen Stand aus dem Verzeichnis, aus dem installiert wurde (`/root/nopaper`), installiert ihn und startet alle Dienste neu, die schon liefen, auch die der Mandanten. `nopaper-aktualisieren --pruefen` zeigt nur, ob es etwas Neues gibt.
+Der Befehl holt den neuen Stand in das Verzeichnis, aus dem installiert wurde (`/root/nopaper`), und startet dort `install.sh`. Das erkennt die vorhandene Installation und startet alle Dienste neu, die schon liefen, auch die der Mandanten. `nopaper-aktualisieren --pruefen` zeigt nur, ob es etwas Neues gibt.
 
-Nicht noch einmal `git clone` ausführen: Das Verzeichnis ist schon da, und der Befehl bricht mit „already exists“ ab.
-
-Gibt es den Befehl noch nicht (Installation vor Version 1.5.3), einmalig von Hand:
+Dasselbe erreichst du, indem du die Schritte 3 und 4 wiederholst. Gibt es den Befehl noch nicht (Installation vor Version 1.5.3), einmalig so:
 
 ```bash
-cd /root/nopaper && git pull && bash install.sh && nopaper-aktivieren
+cd /root/nopaper && git pull --ff-only && bash install.sh
 ```
 
 Ein selbstentpackender Installer für Server ohne git lässt sich mit `werkzeuge/installer-bauen.sh` erzeugen.

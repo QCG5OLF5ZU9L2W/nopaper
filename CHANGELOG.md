@@ -12,7 +12,8 @@ Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` un
 
 - **Beträge mit dem gedruckten Vorzeichen:** Ein Auszahlungsbon (z. B. Pfandrückgabe größer als der Einkauf, „zu zahlen −0,77“) wird negativ erfasst. Beide Prompts verlangen das jetzt. Neue Prüfregel `BRUTTO_VORZEICHEN`: Widerspricht das Vorzeichen des gelesenen Bruttobetrags dem Druckbild, geht der Beleg in die Prüfung. Weil sich die Prompts geändert haben, Musterbelege neu messen.
 
-- **Aktualisieren mit einem Befehl:** `nopaper-aktualisieren` holt den neuen Stand aus dem git-Verzeichnis, aus dem installiert wurde, installiert ihn und startet die laufenden Dienste (auch der Mandanten) neu. `--pruefen` zeigt nur, ob es etwas Neues gibt. Von Hand geänderte Quellen werden nie überschrieben.
+- **Der Installer kann aktualisieren:** `install.sh` erkennt eine vorhandene Installation, lässt Konfiguration, Token und Belege unverändert und startet am Ende die Dienste neu, die schon eingeschaltet waren (auch die der Mandanten). Die Schritte der Anleitung lassen sich wiederholen; `git clone` ist dort durch einen Befehl ersetzt, der bei vorhandenem Verzeichnis nur den neuen Stand holt.
+- **`nopaper-aktualisieren`:** ein Befehl für beides (neuen Stand holen, `install.sh` starten). `--pruefen` zeigt nur, ob es etwas Neues gibt. Von Hand geänderte Quellen werden nie überschrieben.
 
 ## 1.5.2
 
