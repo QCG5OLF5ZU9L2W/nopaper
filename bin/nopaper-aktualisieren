@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Aktualisiert nopaper aus dem git-Verzeichnis, aus dem es installiert wurde (als root):
+#   nopaper-aktualisieren              holt den neuen Stand und startet install.sh (Dienste werden neu gestartet)
+#   nopaper-aktualisieren --pruefen    zeigt nur, ob es einen neueren Stand gibt
+#   nopaper-aktualisieren --erzwingen  installiert auch dann neu, wenn der Stand schon aktuell ist
+# Konfiguration, Token, Belege und Modelle bleiben unveraendert. Braucht Internet (git, Pakete).
+set -euo pipefail
+[[ $EUID -eq 0 ]] || { echo "bitte als root ausfuehren" >&2; exit 1; }
+
+MODUS="${1:-}"
+case "$MODUS" in ""|--pruefen|--erzwingen) ;; *) echo "Aufruf: nopaper-aktualisieren [--pruefen|--erzwingen]" >&2; exit 2 ;; esac
+
+QUELLE="$(cat /opt/nopaper/quelle 2>/dev/null || true)"
+QUELLE="${QUELLE:-/root/nopaper}"
+if ! git -C "$QUELLE" rev-parse --git-dir >/dev/null 2>&1; then
+  cat >&2 <<TEXT
+$QUELLE ist kein git-Verzeichnis – nopaper wurde nicht per 'git clone' installiert.
+Einmalig nachholen:
+    cd /root && git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git && cd nopaper && bash install.sh
+TEXT
+  exit 1
+fi
+
+version() { python3 -I -c 'import re,sys;print(re.search(r"VERSION = \"([^\"]+)\"", open(sys.argv[1]).read()).group(1))' "$1" 2>/dev/null || echo "?"; }
+
+ALT="$(git -C "$QUELLE" rev-parse HEAD)"
+ZWEIG="$(git -C "$QUELLE" rev-parse --abbrev-ref HEAD)"
+echo "==> Quelle $QUELLE (Zweig $ZWEIG), installiert ist Version $(version /opt/nopaper/lib/nopaper/__init__.py)"
+git -C "$QUELLE" fetch --quiet
+NEU="$(git -C "$QUELLE" rev-parse '@{u}' 2>/dev/null)" || { echo "Zweig $ZWEIG hat keinen entfernten Zweig – bitte 'git checkout main'" >&2; exit 1; }
+
+if [[ "$ALT" == "$NEU" ]]; then
+  echo "Bereits auf dem neuesten Stand."
+  [[ "$MODUS" == "--erzwingen" ]] || exit 0
+else
+  echo "Neuer Stand vorhanden:"
+  git -C "$QUELLE" log --oneline "$ALT..$NEU" | sed 's/^/    /'
+  [[ "$MODUS" == "--pruefen" ]] && exit 0
+  # nur vorspulen: eigene Aenderungen im Quellverzeichnis werden nie stillschweigend ueberschrieben
+  git -C "$QUELLE" merge --ff-only --quiet '@{u}' 2>/dev/null || {
+    echo "Das Quellverzeichnis wurde von Hand geaendert – bitte dort aufraeumen (git status) und erneut starten." >&2
+    exit 1; }
+fi
+[[ "$MODUS" == "--pruefen" ]] && exit 0
+
+# Modelle sind schon geladen; die Konfiguration bleibt, also auch die Modellnamen darin.
+# install.sh erkennt die vorhandene Installation und startet die eingeschalteten Dienste selbst neu.
+SKIP_MODELS=1 exec bash "$QUELLE/install.sh"

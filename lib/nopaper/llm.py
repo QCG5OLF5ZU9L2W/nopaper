@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import urllib.error
 import urllib.request
 
 from . import invoice
+
+log = logging.getLogger("nopaper")
 
 
 class OllamaNichtErreichbar(Exception):
@@ -208,10 +211,54 @@ def glaetten(o: Ollama, model: str, text: str) -> tuple[str, list[str]]:
 
 # --------------------------------------------------------------------------- Rechnungsdaten
 
-def analysieren(o: Ollama, model: str, text: str, max_chars: int = 12000) -> dict:
+BASIS_ZEICHEN, BASIS_KONTEXT = 12000, 8192
+AUSLASSUNG = "\n\n[... Mitte des Dokuments ausgelassen ...]\n\n"
+
+
+def text_budget(num_ctx: int) -> int:
+    """So viele Zeichen Dokumenttext passen neben Prompt und Antwort in den Kontext:
+    12.000 je 8.192 Token (modelle.kontext), nie weniger als 12.000."""
+    return max(BASIS_ZEICHEN, BASIS_ZEICHEN * int(num_ctx) // BASIS_KONTEXT)
+
+
+def text_fuer_modell(text: str, max_chars: int, anteil_ende: float = 0.4) -> str:
+    """Der ganze Text, wenn er ins Budget passt. Sonst Anfang (Kopfdaten) UND Ende (Summen) statt
+    nur des Anfangs; die Mitte entfaellt. Geschnitten wird moeglichst an Zeilengrenzen."""
+    if len(text) <= max_chars:
+        return text
+    platz = max(2, max_chars - len(AUSLASSUNG))
+    ende = int(platz * anteil_ende)
+    kopf = platz - ende
+    a, b = text[:kopf], text[len(text) - ende:]
+    i = a.rfind("\n")
+    if i > kopf * 0.8:
+        a = a[:i]
+    j = b.find("\n")
+    if 0 <= j < ende * 0.2:
+        b = b[j + 1:]
+    # nur Kennzahlen protokollieren, nie Inhalt
+    log.info("dokumenttext gekuerzt: %d von %d zeichen an das modell (anfang und ende)", len(a) + len(b), len(text))
+    return a + AUSLASSUNG + b
+
+
+TOKEN_JE_SEITENBILD = 3500   # Seitenbild bei 170 dpi: ca. 2.500-3.500 Token
+
+
+def bild_kontext(num_ctx: int) -> int:
+    """Kontext fuer Aufrufe mit Seitenbildern: mindestens 16.384 Token."""
+    return max(int(num_ctx), 16384)
+
+
+def seiten_budget(num_ctx: int) -> int:
+    """So viele Seitenbilder passen neben Vorlage und Antwort in den Kontext, nie weniger als 3."""
+    return max(3, (bild_kontext(num_ctx) - 2000) // TOKEN_JE_SEITENBILD)
+
+
+def analysieren(o: Ollama, model: str, text: str, max_chars: int | None = None) -> dict:
     """Ein Aufruf fuer Einordnung (kategorie, sicherheit) und Rechnungsdaten."""
+    text = text_fuer_modell(text, max_chars or text_budget(o.num_ctx))
     return o.chat_json(model, invoice.EXTRACT_PROMPT,
-                       "OCR-Text des Dokuments:\n<<<\n" + text[:max_chars] + "\n>>>",
+                       "OCR-Text des Dokuments:\n<<<\n" + text + "\n>>>",
                        invoice.build_schema(False))
 
 
@@ -261,6 +308,8 @@ Bei mahnung, bestellbestaetigung, buchungsbestaetigung, lieferschein, brief, son
 seller ist der Rechnungssteller, nie der Empfaenger. Eingangsstempel ignorieren; massgeblich ist das gedruckte Datum.
 invoice_number: Rechnungs-, Beleg- oder Bonnummer - nicht Kunden-, Auftrags-, Steuer-, Terminal- oder Kassennummer.
 tax_number = Steuernummer (St.-Nr.), vat_id = USt-IdNr.
+Betraege mit dem gedruckten Vorzeichen: steht ein Minus davor oder dahinter (Auszahlung, z.B. Pfandrueckgabe
+groesser als der Einkauf, "zu zahlen -0,77"), sind gross_total, net_total, tax_total und vat_breakdown negativ.
 gross_total = Endbetrag/Rechnungsbetrag, nicht Zwischensumme. net_total und tax_total sind Summen ueber alle
 Steuersaetze; jeder Steuersatz zusaetzlich als Zeile in vat_breakdown. Steuerfrei: rate 0 und Befreiungshinweis.
 Versicherungsteuer ist keine Umsatzsteuer: tax_total 0, rate 0. prepaid = bereits bezahlt (bar, Karte, PayPal),
@@ -287,15 +336,15 @@ def _json_aus_antwort(text: str) -> dict:
 
 
 def analysieren_nuextract(o: Ollama, model: str, text: str | None = None,
-                          bilder: list[str] | None = None, max_chars: int = 12000) -> dict:
+                          bilder: list[str] | None = None, max_chars: int | None = None) -> dict:
     """Kategorie + Rechnungsdaten mit NuExtract3, wahlweise aus OCR-Text oder direkt aus Seitenbildern."""
-    user = {"role": "user", "content": "" if bilder else (text or "")[:max_chars]}
+    user = {"role": "user",
+            "content": "" if bilder else text_fuer_modell(text or "", max_chars or text_budget(o.num_ctx))}
     if bilder:
         user["images"] = bilder
     payload = {
         "model": model, "stream": False, "think": False,
-        # Seitenbilder brauchen ca. 2.500-3.500 Token pro Seite (170 dpi)
-        "options": {"temperature": 0, "num_ctx": max(o.num_ctx, 16384) if bilder else o.num_ctx},
+        "options": {"temperature": 0, "num_ctx": bild_kontext(o.num_ctx) if bilder else o.num_ctx},
         "messages": [
             {"role": "template", "content": json.dumps(NUEXTRACT_TEMPLATE, ensure_ascii=False, indent=2)},
             {"role": "instructions", "content": NUEXTRACT_INSTRUCTIONS},

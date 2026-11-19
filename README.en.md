@@ -64,11 +64,11 @@ apt-get -y install git ca-certificates
 
 ```bash
 cd /root
-git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git
+if [ -d nopaper/.git ]; then git -C nopaper pull --ff-only; else git clone https://github.com/QCG5OLF5ZU9L2W/nopaper.git; fi
 cd /root/nopaper
 ```
 
-The folder `/root/nopaper` then holds the sources. The program itself goes to `/opt/nopaper` in the next step.
+The folder `/root/nopaper` then holds the sources. The program itself goes to `/opt/nopaper` in the next step. If the folder already exists, the command only fetches the new state; steps 3 and 4 can therefore be repeated at any time.
 
 ### 4. Install
 
@@ -80,6 +80,8 @@ PAPERLESS_URL=https://paperless.example.org EMPFAENGER="Example Ltd" bash instal
 ```
 
 The script installs the packages, Ollama with the language models (several GB, which takes a while depending on the connection) and nopaper as a systemd service. The service is not started yet. After the models have been pulled, Ollama is restricted to localhost. The two values apply to the default instance; further tenants are created later (see [Tenants](#tenants)).
+
+On an existing installation the same call updates the program: configuration, token and documents are kept, the two values are no longer needed, and the services that were already running are restarted.
 
 At the end it prints `nopaper ist installiert.` Check that the models are there:
 
@@ -167,16 +169,19 @@ usermod -aG nopaper-eingang USERNAME
 
 ### 10. Updating later
 
-The server briefly needs internet access again for this. The configuration is kept.
+The server briefly needs internet access again for this. Configuration, token, documents and models are kept.
 
 ```bash
-cd /root/nopaper
-git pull
-bash install.sh
-nopaper-aktivieren
+nopaper-aktualisieren
 ```
 
-For each tenant additionally `nopaper-aktivieren <name>`.
+The command fetches the new state into the directory nopaper was installed from (`/root/nopaper`) and runs `install.sh` there. That recognises the existing installation and restarts all services that were already running, including those of the tenants. `nopaper-aktualisieren --pruefen` only shows whether there is something new.
+
+Repeating steps 3 and 4 does the same. If the command does not exist yet (installed before version 1.5.3), once like this:
+
+```bash
+cd /root/nopaper && git pull --ff-only && bash install.sh
+```
 
 A self-extracting installer for servers without git can be built with `werkzeuge/installer-bauen.sh`.
 
@@ -266,6 +271,17 @@ Optional. If the configuration contains a section `kumero`, nopaper sends every 
 - If kumero cannot be reached, document processing continues and the sidecars are sent later (after 1, 5, 15 minutes, then hourly).
 - Rejected sidecars are stored under `ausgang/rechnungsdaten/abgelehnt/` with a companion file that names only the code.
 - With `tags.zu_buchen` nopaper additionally sets a tag meaning "still to be booked" on every receipt.
+
+## Long invoices
+
+With the defaults the model gets up to 12,000 characters of text (about four to six pages) or three page images. If a document is longer, it reads the start and the end. To have an invoice of ten or more pages read completely, raise two values under `modelle` in the configuration:
+
+| Key | Default | Effect |
+|---|---|---|
+| `kontext` | 8192 | Text budget: 12,000 characters per 8,192 tokens. With 65536 that is 96,000 characters. |
+| `nuextract_seiten` | 3 | Page images for NuExtract in image mode. Never more are used than fit into the context (about 3,500 tokens per page; with 65536 up to 18 pages). |
+
+More context needs more memory and computing time; on a machine without a graphics card this is of limited use. `ollama ps` shows whether the model still fits completely into graphics memory (`100% GPU`).
 
 ## Operation
 

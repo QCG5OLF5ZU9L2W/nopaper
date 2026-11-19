@@ -200,6 +200,9 @@ Regeln fuer die Rechnungsdaten:
 - Datumsangaben als JJJJ-MM-TT. Ignoriere Eingangsstempel (z.B. "08 OKT. 2026" quer oder farbig) - massgeblich ist das
   gedruckte Rechnungs- bzw. Belegdatum. Zweistellige Jahre: "17.07.26" = 2026-07-17. Amerikanische Daten MM/DD/YYYY.
 - Betraege als Zahl mit Punkt als Dezimaltrenner, ohne Tausendertrennzeichen und ohne Waehrungszeichen.
+- Betraege mit dem gedruckten Vorzeichen uebernehmen. Steht ein Minus davor oder dahinter (Auszahlung, z.B.
+  Pfandrueckgabe groesser als der Einkauf: "zu zahlen -0,77"), ist der Betrag negativ: gross_total -0.77,
+  ebenso net_total, tax_total und die Zeilen in vat_breakdown.
 - seller ist der Rechnungssteller (Absender), nie der Empfaenger.
 - tax_number ist die Steuernummer (auch "St.-Nr.", "Steuer-Nr."), vat_id die USt-IdNr. ("USt-ID", "Ust.-IdNr."),
   Leerzeichen darin entfernen.
@@ -357,6 +360,60 @@ def brutto_ist_zwischensumme(gross: Decimal, text: str) -> bool:
     return all(_ZWISCHEN.search(z) and not _ENDBETRAG.search(_ZWISCHEN.sub("", z)) for z in zeilen)
 
 
+_MINUS = "-\u2212\u2013"   # Minus, echtes Minuszeichen, Halbgeviertstrich
+
+
+def vorzeichen_im_text(betrag: Decimal, text: str) -> tuple[int, int]:
+    """Zaehlt, wie oft der Betrag im Text mit Minus steht (davor oder direkt dahinter) und wie oft ohne."""
+    neg = pos = 0
+    for v in sorted(amount_variants(betrag), key=len, reverse=True):
+        muster = re.compile(r"(?<![\d.,])([" + _MINUS + r"]\s?)?" + re.escape(v) +
+                            r"(?![\d])(\s?[" + _MINUS + r"](?!\s?\d))?")
+        treffer = list(muster.finditer(text))
+        if treffer:
+            for m in treffer:
+                if m.group(1) or m.group(2):
+                    neg += 1
+                else:
+                    pos += 1
+            break   # die Schreibweisen ueberlappen sich; nur die laengste passende zaehlen
+    return neg, pos
+
+
+def brutto_vorzeichen_falsch(gross: Decimal, text: str) -> bool:
+    """True, wenn das Vorzeichen des Bruttobetrags dem Druckbild widerspricht: Der Beleg weist den Betrag
+    ueberwiegend mit Minus aus (Auszahlung, z.B. Pfandrueckgabe groesser als der Einkauf), das Modell
+    liefert ihn positiv - oder das Modell liefert ihn negativ, im Text steht er nie mit Minus."""
+    if gross == 0:
+        return False
+    neg, pos = vorzeichen_im_text(gross, text)
+    if neg + pos == 0:
+        return False
+    return (neg > pos) if gross > 0 else (neg == 0)
+
+
+def brutto_durch_aufschluesselung_belegt(inv: dict, text: str) -> bool:
+    """True, wenn die USt-Aufschluesselung den Bruttobetrag unabhaengig bestaetigt: jede Zeile in sich
+    stimmig, alle Netto- und Steuerbetraege stehen im Text, mindestens eine Zeile traegt Steuer, und
+    Netto + Steuer ueber alle Zeilen ergibt genau den Bruttobetrag. Dann ist der Betrag kein Uebertrag,
+    auch wenn er im erkannten Text nur neben 'Zwischensumme' steht (Kassenbon ohne Summenzeile)."""
+    rows = inv.get("vat") or []
+    gross = inv.get("gross")
+    if gross is None or not rows:
+        return False
+    if any(r.get("basis") is None or r.get("tax") is None or r.get("rate") is None for r in rows):
+        return False
+    if not any(r["tax"] > 0 for r in rows):
+        return False
+    if any(abs(r["basis"] * r["rate"] / 100 - r["tax"]) > TOL + Decimal("0.01") for r in rows):
+        return False
+    if abs(sum(r["basis"] + r["tax"] for r in rows) - gross) > TOL:
+        return False
+    flat = re.sub(r"\s+", "", text)
+    return all(any(v in flat for v in amount_variants(r[k]))
+               for r in rows for k in ("basis", "tax") if r[k] != 0)
+
+
 def normalize(raw: dict, buyer_name: str | None) -> dict:
     """LLM-Ausgabe in typisierte, bereinigte Struktur ueberfuehren."""
     s = raw.get("seller") or {}
@@ -475,8 +532,11 @@ def validate(inv: dict, text: str, today: dt.date | None = None) -> list[str]:
         issues.append("RECHNUNGSNUMMER_FALSCHE_BEZEICHNUNG")
     if inv["gross"] is not None and not any(v in flat for v in amount_variants(inv["gross"])):
         issues.append("BRUTTO_NICHT_IM_TEXT")
-    if inv["gross"] is not None and brutto_ist_zwischensumme(inv["gross"], text):
+    if inv["gross"] is not None and brutto_ist_zwischensumme(inv["gross"], text) \
+            and not brutto_durch_aufschluesselung_belegt(inv, text):
         issues.append("BRUTTO_IST_ZWISCHENSUMME")
+    if inv["gross"] is not None and brutto_vorzeichen_falsch(inv["gross"], text):
+        issues.append("BRUTTO_VORZEICHEN")
     if inv["iban"] and inv["iban"] not in re.sub(r"[\s.,]+", "", text).upper():
         issues.append("IBAN_NICHT_IM_TEXT")
     if inv["issue_date"] and not datum_im_text(inv["issue_date"], text):

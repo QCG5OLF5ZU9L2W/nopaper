@@ -947,6 +947,102 @@ class RegelTest(unittest.TestCase):
         self.assertEqual(ocr.seiten_auswahl(6, 3), [1, 2, 6])
         self.assertEqual(ocr.seiten_auswahl(2, 3), [1, 2])
 
+    def test_zwischensumme_durch_aufschluesselung_belegt(self):
+        # Kassenbon ohne Summenzeile: der Endbetrag steht im erkannten Text nur neben "Zwischensumme"
+        # (die fett gedruckte Zahlzeile wurde falsch gelesen), die Steuertabelle bestaetigt ihn aber.
+        text = ("2 X Mustergericht 10,70 21,40\n1 X Mustergetraenk 11,90\nZwischensumme *33,30\nKarte x3/, 30\n"
+                "Netto MwSt Brutto\nMwSt. 19% *10,00 *1,90 *11,90\nMwSt. 7% *20,00 *1,40 *21,40\n")
+        vat = [{"rate": Decimal("19"), "basis": Decimal("10.00"), "tax": Decimal("1.90"), "exemption_reason": None},
+               {"rate": Decimal("7"), "basis": Decimal("20.00"), "tax": Decimal("1.40"), "exemption_reason": None}]
+        inv = {"gross": Decimal("33.30"), "vat": vat}
+        self.assertTrue(invoice.brutto_ist_zwischensumme(Decimal("33.30"), text))
+        self.assertTrue(invoice.brutto_durch_aufschluesselung_belegt(inv, text))
+        # Uebertrag einer mehrseitigen Rechnung: die Aufschluesselung ergibt den Endbetrag, nicht den Uebertrag
+        lang = "Übertrag 1.199,90\nNettobetrag 1.239,32\nUmsatzsteuer 19,00 % 235,47\nEndbetrag 1.474,79"
+        v19 = [{"rate": Decimal("19"), "basis": Decimal("1239.32"), "tax": Decimal("235.47"), "exemption_reason": None}]
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("1199.90"), "vat": v19}, lang))
+        # nicht belegt: Betraege der Aufschluesselung stehen nicht im Text (vom Modell passend erfunden)
+        erfunden = [{"rate": Decimal("19"), "basis": Decimal("27.98"), "tax": Decimal("5.32"), "exemption_reason": None}]
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": erfunden}, text))
+        # nicht belegt: nur eine steuerfreie Zeile - deren Basis IST der fragliche Betrag, also kein eigener Beleg
+        frei = [{"rate": Decimal("0"), "basis": Decimal("33.30"), "tax": Decimal("0"), "exemption_reason": None}]
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": frei}, text))
+        # ohne Aufschluesselung bleibt es bei der Pruefung
+        self.assertFalse(invoice.brutto_durch_aufschluesselung_belegt({"gross": Decimal("33.30"), "vat": []}, text))
+
+    def test_brutto_vorzeichen(self):
+        # Auszahlungsbon: Pfandrueckgabe groesser als der Einkauf, alle Summen mit Minus gedruckt
+        bon = ("Mustergetraenk 2,00 x 2 4,00 B\nPfandrueckgabe -5,23 B\nzu zahlen -1,23\n"
+               "MWST% MWST + Netto = Brutto\nB 19 % -0,20 -1,03 -1,23\nSumme -0,20 -1,03 -1,23\n")
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("1.23"), bon), (3, 0))
+        self.assertTrue(invoice.brutto_vorzeichen_falsch(Decimal("1.23"), bon))     # Modell: positiv -> pruefen
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("-1.23"), bon))   # Modell: wie gedruckt
+        # gewoehnliche Rechnung: positiv gedruckt
+        rechnung = "Nettobetrag 100,00\nUmsatzsteuer 19 % 19,00\nRechnungsbetrag 119,00 EUR\n"
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("119.00"), rechnung))
+        self.assertTrue(invoice.brutto_vorzeichen_falsch(Decimal("-119.00"), rechnung))  # Minus erfunden
+        # Minus hinter dem Betrag (kaufmaennische Schreibweise) zaehlt als negativ, ein Bereich nicht
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("45.00"), "Gutschrift 45,00-\nSumme 45,00 -"), (2, 0))
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("10.00"), "Staffel 10,00-20,00 EUR"), (0, 1))
+        # Bindestrich in Nummern oder Datumsangaben ist kein Vorzeichen des Betrags
+        self.assertEqual(invoice.vorzeichen_im_text(Decimal("12.50"), "Beleg 2026-12,50 Summe 12,50"), (0, 2))
+        # Rabattzeile mit gleichem Betrag neben der positiven Summe: unentschieden, keine Meldung
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("50.00"), "Rabatt -50,00\nSumme 50,00"))
+        # Betrag steht gar nicht im Text: Sache der Verankerung, nicht dieser Regel
+        self.assertFalse(invoice.brutto_vorzeichen_falsch(Decimal("7.77"), bon))
+        # in der Gesamtpruefung: positiv gelesener Auszahlungsbon geht in die Pruefung
+        i = self.inv(gross=Decimal("1.23"), net=Decimal("1.03"), tax=Decimal("0.20"))
+        self.assertIn("BRUTTO_VORZEICHEN", invoice.validate(i, bon))
+        i = self.inv(gross=Decimal("-1.23"), net=Decimal("-1.03"), tax=Decimal("-0.20"))
+        self.assertNotIn("BRUTTO_VORZEICHEN", invoice.validate(i, bon))
+
+    def test_langer_text_fuer_das_modell(self):
+        from nopaper import llm
+        # Budget waechst mit modelle.kontext, faellt aber nie unter den bisherigen Wert
+        self.assertEqual(llm.text_budget(8192), 12000)
+        self.assertEqual(llm.text_budget(4096), 12000)
+        self.assertEqual(llm.text_budget(32768), 48000)
+        self.assertEqual(llm.text_budget(65536), 96000)
+        # Seitenbilder: Standard (3 Seiten bei 8k) bleibt, grosser Kontext erlaubt die ganze Rechnung
+        self.assertGreaterEqual(llm.seiten_budget(8192), 3)
+        self.assertEqual(llm.seiten_budget(4096), llm.seiten_budget(16384))
+        self.assertEqual(llm.seiten_budget(65536), 18)
+        # passt der Text, geht er unveraendert und vollstaendig an das Modell
+        kurz = "Kopf\n" + "Position 1,00\n" * 500 + "Endbetrag 500,00\n"
+        self.assertEqual(llm.text_fuer_modell(kurz, 12000), kurz)
+        # mehrseitige Rechnung: mit grossem Kontext vollstaendig, Anfang bis Ende
+        lang = "RECHNUNG Nr. 4711\n" + "Artikel 0815 Muster 1,00 A\n" * 2000 + "Endbetrag 2.000,00 EUR\n"
+        self.assertGreater(len(lang), 48000)
+        self.assertEqual(llm.text_fuer_modell(lang, llm.text_budget(65536)), lang)
+        # passt er nicht: Anfang UND Ende, nie nur der Anfang
+        t = llm.text_fuer_modell(lang, 12000)
+        self.assertLessEqual(len(t), 12000)
+        self.assertTrue(t.startswith("RECHNUNG Nr. 4711\n"))
+        self.assertTrue(t.endswith("Endbetrag 2.000,00 EUR\n"))
+        self.assertEqual(t.count(llm.AUSLASSUNG), 1)
+        for teil in t.split(llm.AUSLASSUNG):      # an Zeilengrenzen geschnitten, keine halben Zeilen
+            for zeile in teil.strip("\n").split("\n")[1:-1]:
+                self.assertEqual(zeile, "Artikel 0815 Muster 1,00 A")
+        self.assertTrue(t.split(llm.AUSLASSUNG)[0].endswith("1,00 A"))
+        self.assertTrue(t.split(llm.AUSLASSUNG)[1].startswith("Artikel"))
+
+    def test_analyse_bekommt_den_ganzen_text(self):
+        from nopaper import llm
+        gesehen = []
+
+        class Mitschnitt(llm.Ollama):
+            def chat_json(self, model, system, user, schema, images=None):
+                gesehen.append(user)
+                return {}
+
+        lang = "RECHNUNG Nr. 4711\n" + "Artikel 0815 Muster 1,00 A\n" * 2000 + "Endbetrag 2.000,00 EUR\n"
+        llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=65536), "m", lang)
+        self.assertIn(lang, gesehen[-1])                       # grosser Kontext: alles
+        llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=8192), "m", lang)
+        self.assertIn("RECHNUNG Nr. 4711", gesehen[-1])        # kleiner Kontext: Anfang und Ende
+        self.assertIn("Endbetrag 2.000,00 EUR", gesehen[-1])
+        self.assertLess(len(gesehen[-1]), 12100)
+
     def test_steuersatz_aus_betraegen(self):
         # abgeschnittener Supermarkt-Bon: Satz fehlt, Modell setzt 0 %
         raw = {"kategorie": "kassenbon", "totals": {"net_total": 5.60, "tax_total": 0.39, "gross_total": 5.99,

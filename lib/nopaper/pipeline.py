@@ -44,7 +44,12 @@ def analyse(c: Config, ki: llm.Ollama, roh: str, original: Path | None = None,
     if c.extraktor == "nuextract3":
         if c.nuextract_eingabe == "bild" and original is not None and workdir is not None \
                 and original.suffix.lower() == ".pdf" and not ocr.ist_digital(original):
-            bilder = ocr.seiten_als_bilder(original, workdir, c.nuextract_seiten)
+            # nie mehr Seitenbilder, als in den Kontext passen (sonst schneidet Ollama stumm ab)
+            seiten = min(c.nuextract_seiten, llm.seiten_budget(c.num_ctx))
+            if seiten < c.nuextract_seiten:
+                log.info("nuextract_seiten=%d passt nicht in modelle.kontext=%d, verwende %d seiten",
+                         c.nuextract_seiten, c.num_ctx, seiten)
+            bilder = ocr.seiten_als_bilder(original, workdir, seiten)
             return llm.analysieren_nuextract(ki, c.modell_extraktion, bilder=bilder)
         return llm.analysieren_nuextract(ki, c.modell_extraktion, text=text_ki or roh)
     return llm.analysieren(ki, c.modell_text, text_ki or roh)
