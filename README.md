@@ -265,6 +265,17 @@ Optional. Ist in der Konfiguration ein Abschnitt `kumero` eingetragen, sendet no
 - Abgelehnte Sidecars liegen unter `ausgang/rechnungsdaten/abgelehnt/` mit einer Begleitdatei, die nur den Code nennt.
 - Mit `tags.zu_buchen` setzt nopaper jedem Beleg zusätzlich ein Tag für „noch zu buchen“.
 
+## Lange Rechnungen
+
+Mit den Standardwerten bekommt das Modell bis zu 12.000 Zeichen Text (etwa vier bis sechs Seiten) oder drei Seitenbilder. Ist ein Dokument länger, liest es Anfang und Ende. Soll eine Rechnung mit zehn und mehr Seiten vollständig gelesen werden, hebst du in der Konfiguration unter `modelle` zwei Werte an:
+
+| Schlüssel | Standard | Wirkung |
+|---|---|---|
+| `kontext` | 8192 | Textbudget: 12.000 Zeichen je 8.192 Token. Mit 65536 sind es 96.000 Zeichen. |
+| `nuextract_seiten` | 3 | Seitenbilder für NuExtract im Bild-Modus. Es werden nie mehr verwendet, als in den Kontext passen (etwa 3.500 Token je Seite; mit 65536 bis zu 18 Seiten). |
+
+Mehr Kontext braucht mehr Speicher und Rechenzeit; auf einer Maschine ohne Grafikkarte ist das nur begrenzt sinnvoll. Mit `ollama ps` siehst du, ob das Modell noch ganz in den Grafikspeicher passt (`100% GPU`).
+
 ## Betrieb
 
 ```bash

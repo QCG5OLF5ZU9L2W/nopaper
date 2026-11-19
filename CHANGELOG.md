@@ -2,6 +2,13 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.5.3
+
+- **Lange Rechnungen vollständig lesen:** Wie viel Text das Modell bekommt, richtet sich jetzt nach `modelle.kontext` (12.000 Zeichen je 8.192 Token, bisher fest 12.000 Zeichen). Mit großem Kontext geht eine mehrseitige Rechnung von Anfang bis Ende an das Modell. Mit dem Standardwert 8192 ändert sich für Dokumente bis 12.000 Zeichen nichts.
+- **Passt der Text trotzdem nicht,** bekommt das Modell Anfang und Ende (Kopfdaten und Summen) statt nur den Anfang. Das Protokoll nennt dazu nur die Zeichenzahlen.
+- **NuExtract im Bild-Modus:** `modelle.nuextract_seiten` wird auf die Zahl der Seitenbilder begrenzt, die in den Kontext passen (etwa 3.500 Token je Seite). Bisher schnitt Ollama stumm ab, wenn mehr Seiten eingestellt waren.
+- Noch nicht an echten langen Rechnungen gemessen.
+
 ## 1.5.2
 
 - **Ubuntu LTS neben Debian:** `install.sh` läuft auch auf Ubuntu 24.04 LTS und 26.04 LTS (amd64). Ältere Ubuntu-Fassungen werden abgelehnt, weil ihnen Python ≥ 3.11 fehlt. Fehlt die Paketquelle `universe` (dort liegen `ocrmypdf`, `unpaper` und `tesseract-ocr-deu`), schaltet der Installer sie ein. Noch nicht auf einem echten Ubuntu erprobt.

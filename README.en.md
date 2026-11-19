@@ -267,6 +267,17 @@ Optional. If the configuration contains a section `kumero`, nopaper sends every 
 - Rejected sidecars are stored under `ausgang/rechnungsdaten/abgelehnt/` with a companion file that names only the code.
 - With `tags.zu_buchen` nopaper additionally sets a tag meaning "still to be booked" on every receipt.
 
+## Long invoices
+
+With the defaults the model gets up to 12,000 characters of text (about four to six pages) or three page images. If a document is longer, it reads the start and the end. To have an invoice of ten or more pages read completely, raise two values under `modelle` in the configuration:
+
+| Key | Default | Effect |
+|---|---|---|
+| `kontext` | 8192 | Text budget: 12,000 characters per 8,192 tokens. With 65536 that is 96,000 characters. |
+| `nuextract_seiten` | 3 | Page images for NuExtract in image mode. Never more are used than fit into the context (about 3,500 tokens per page; with 65536 up to 18 pages). |
+
+More context needs more memory and computing time; on a machine without a graphics card this is of limited use. `ollama ps` shows whether the model still fits completely into graphics memory (`100% GPU`).
+
 ## Operation
 
 ```bash

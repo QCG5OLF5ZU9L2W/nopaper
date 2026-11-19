@@ -947,6 +947,53 @@ class RegelTest(unittest.TestCase):
         self.assertEqual(ocr.seiten_auswahl(6, 3), [1, 2, 6])
         self.assertEqual(ocr.seiten_auswahl(2, 3), [1, 2])
 
+    def test_langer_text_fuer_das_modell(self):
+        from nopaper import llm
+        # Budget waechst mit modelle.kontext, faellt aber nie unter den bisherigen Wert
+        self.assertEqual(llm.text_budget(8192), 12000)
+        self.assertEqual(llm.text_budget(4096), 12000)
+        self.assertEqual(llm.text_budget(32768), 48000)
+        self.assertEqual(llm.text_budget(65536), 96000)
+        # Seitenbilder: Standard (3 Seiten bei 8k) bleibt, grosser Kontext erlaubt die ganze Rechnung
+        self.assertGreaterEqual(llm.seiten_budget(8192), 3)
+        self.assertEqual(llm.seiten_budget(4096), llm.seiten_budget(16384))
+        self.assertEqual(llm.seiten_budget(65536), 18)
+        # passt der Text, geht er unveraendert und vollstaendig an das Modell
+        kurz = "Kopf\n" + "Position 1,00\n" * 500 + "Endbetrag 500,00\n"
+        self.assertEqual(llm.text_fuer_modell(kurz, 12000), kurz)
+        # mehrseitige Rechnung: mit grossem Kontext vollstaendig, Anfang bis Ende
+        lang = "RECHNUNG Nr. 4711\n" + "Artikel 0815 Muster 1,00 A\n" * 2000 + "Endbetrag 2.000,00 EUR\n"
+        self.assertGreater(len(lang), 48000)
+        self.assertEqual(llm.text_fuer_modell(lang, llm.text_budget(65536)), lang)
+        # passt er nicht: Anfang UND Ende, nie nur der Anfang
+        t = llm.text_fuer_modell(lang, 12000)
+        self.assertLessEqual(len(t), 12000)
+        self.assertTrue(t.startswith("RECHNUNG Nr. 4711\n"))
+        self.assertTrue(t.endswith("Endbetrag 2.000,00 EUR\n"))
+        self.assertEqual(t.count(llm.AUSLASSUNG), 1)
+        for teil in t.split(llm.AUSLASSUNG):      # an Zeilengrenzen geschnitten, keine halben Zeilen
+            for zeile in teil.strip("\n").split("\n")[1:-1]:
+                self.assertEqual(zeile, "Artikel 0815 Muster 1,00 A")
+        self.assertTrue(t.split(llm.AUSLASSUNG)[0].endswith("1,00 A"))
+        self.assertTrue(t.split(llm.AUSLASSUNG)[1].startswith("Artikel"))
+
+    def test_analyse_bekommt_den_ganzen_text(self):
+        from nopaper import llm
+        gesehen = []
+
+        class Mitschnitt(llm.Ollama):
+            def chat_json(self, model, system, user, schema, images=None):
+                gesehen.append(user)
+                return {}
+
+        lang = "RECHNUNG Nr. 4711\n" + "Artikel 0815 Muster 1,00 A\n" * 2000 + "Endbetrag 2.000,00 EUR\n"
+        llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=65536), "m", lang)
+        self.assertIn(lang, gesehen[-1])                       # grosser Kontext: alles
+        llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=8192), "m", lang)
+        self.assertIn("RECHNUNG Nr. 4711", gesehen[-1])        # kleiner Kontext: Anfang und Ende
+        self.assertIn("Endbetrag 2.000,00 EUR", gesehen[-1])
+        self.assertLess(len(gesehen[-1]), 12100)
+
     def test_steuersatz_aus_betraegen(self):
         # abgeschnittener Supermarkt-Bon: Satz fehlt, Modell setzt 0 %
         raw = {"kategorie": "kassenbon", "totals": {"net_total": 5.60, "tax_total": 0.39, "gross_total": 5.99,
