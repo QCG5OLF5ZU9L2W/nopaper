@@ -579,6 +579,7 @@ class Nopaper:
         self.ids_laden()
         c = self.cfg
         t0 = time.monotonic()
+        log.info("doc=%s beginnt: original holen, text erkennen", doc_id)
         doc = self.pl.dokument(doc_id)
         meta = self.pl.metadaten(doc_id)
         with tempfile.TemporaryDirectory(dir=c.arbeit, prefix=".tmp-") as tmp:
@@ -592,6 +593,8 @@ class Nopaper:
             roh = self.ocr_text(original, workdir, c.ocr_sprache)
             if not roh.strip():
                 raise PaperlessFehler("KEIN_OCR_TEXT")
+            log.info("doc=%s text erkannt (%d zeichen, %.0fs): einordnen und auslesen mit dem modell", doc_id,
+                     len(roh), time.monotonic() - t0)
             inv, issues, notes, methode, modell = self._rechnung_auslesen(
                 original, roh, workdir, kategorie="rechnung" if erzwingen else None)
             kat = inv["kategorie"]
@@ -607,6 +610,8 @@ class Nopaper:
                 self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0, pruefen=pruefen,
                                   vorweg=("KEINE_RECHNUNG",))
                 return "keine_rechnung"
+            log.info("doc=%s ausgelesen als %s (%.0fs): text glaetten, codes lesen, in paperless schreiben", doc_id,
+                     kat or "-", time.monotonic() - t0)
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
             gelesen = self.codes_lesen(original, workdir)
             girocode_anwenden(inv, issues, notes, qr.erster_girocode(gelesen))
@@ -697,6 +702,7 @@ class Nopaper:
         self.ids_laden()
         c = self.cfg
         t0 = time.monotonic()
+        log.info("doc=%s beginnt: original holen, text erkennen", doc_id)
         doc = self.pl.dokument(doc_id)
         meta = self.pl.metadaten(doc_id)
         with tempfile.TemporaryDirectory(dir=c.arbeit, prefix=".tmp-") as tmp:
@@ -717,6 +723,8 @@ class Nopaper:
         """Kern des Volltext-Wegs fuer ein Dokument, das keine Rechnung ist: Text glaetten und (wenn nicht
         schlechter) zurueckschreiben, Termin einer Ladung und Codes in die eingerichteten Felder, Ausloeser
         entfernen – alles in einem Aufruf. `pruefen` setzt zusaetzlich den Pruef-Tag."""
+        log.info("doc=%s volltext-weg (%.0fs): text glaetten, termin und codes suchen, in paperless schreiben",
+                 doc_id, time.monotonic() - t0)
         text, codes = glaetten_wenn_noetig(self.cfg, self.ki, original, roh)
         tcodes, tfelder = self._termin(roh, text)
         if "barcode" in self.felder or "qrcode" in self.felder:

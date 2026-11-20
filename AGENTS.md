@@ -6,7 +6,7 @@ Diese Datei hält fest, **was** gebaut wird und **welche Entscheidungen bereits 
 Wer an diesem Projekt arbeitet (Mensch oder Coding-Agent), hält sich daran. Abweichungen nur nach
 Rücksprache mit dem Projektverantwortlichen (zugleich Datenschutzbeauftragter).
 
-Stand: 2026-11-20 (Version 1.8.6; Lernen aus Buchungen nach E37, E39 noch nicht gebaut; E40–E44 in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9 gebaut; E54 in 1.4.10, E56 in 1.5.0, E57 in 1.5.2, E58 bis E60 in 1.5.3, E61 in 1.6.0, E62 in 1.7.0, E63 in 1.7.1, E64 in 1.7.2, E65 in 1.7.3, E66 in 1.7.4, E67 in 1.8.0, E69 in 1.8.2 gebaut; E68 (Rückweg zum Lernen) zurückgestellt; E51–E53, E55 entschieden, noch nicht gebaut)
+Stand: 2026-11-20 (Version 1.8.7; Lernen aus Buchungen nach E37, E39 noch nicht gebaut; E40–E44 in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9 gebaut; E54 in 1.4.10, E56 in 1.5.0, E57 in 1.5.2, E58 bis E60 in 1.5.3, E61 in 1.6.0, E62 in 1.7.0, E63 in 1.7.1, E64 in 1.7.2, E65 in 1.7.3, E66 in 1.7.4, E67 in 1.8.0, E69 in 1.8.2 gebaut; E68 (Rückweg zum Lernen) zurückgestellt; E51–E53, E55 entschieden, noch nicht gebaut)
 
 ---
 
@@ -383,7 +383,7 @@ Ergebnis: NuExtract im Bild-Modus ist gleichauf mit qwen, mit den Korrekturen au
     j. **Negative Beträge** (E60): ob paperless und kumero sie in den Feldern annehmen, ist nicht am Echtsystem bestätigt.
     k. **Patientenzuordnung gescannter Schreiben** – eigenes Vorhaben außerhalb von nopaper; offen sind Praxissoftware, Zugriff auf den Patientenstamm und der Ablageweg.
 
-## 13. Aufbau des Codes (Version 1.8.6)
+## 13. Aufbau des Codes (Version 1.8.7)
 
 | Datei | Inhalt |
 |---|---|
