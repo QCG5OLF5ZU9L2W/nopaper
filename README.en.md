@@ -283,11 +283,27 @@ If a document carries the tag from `tags.ausloeser_text` and is a court summons,
 |---|---|---|
 | `termin` | Date | day of the hearing |
 | `terminzeit` | Text | time and room, e.g. "11:00 Uhr, Sitzungssaal V" |
-| `aktenzeichen` | Text | the court's file number |
+| `aktenzeichen` | Text | the court's file number (not needed if file numbers are tags, see below) |
 
 Detection uses fixed rules, no language model: only a date that stands next to "Termin", "Verhandlung", "geladen" or "anberaumt" and is followed by a time of day counts. If the date cannot be read reliably or several are in the text (for example a rescheduling notice), the fields stay empty and the document gets the review tag.
 
 The field is a working aid and does not replace deadline control: if text recognition misreads a digit, the wrong day ends up in the field. The summons itself is authoritative.
+
+## File numbers as tags
+
+If file numbers exist in paperless as tags, nopaper assigns them. Add this under `tags` in the configuration:
+
+```json
+"aktenzeichen": true
+```
+
+In every document it processes, nopaper then searches for the names of existing tags that are file numbers and adds the matching one. A tag counts as a file number if its name contains "number/year", e.g. `7 A 1234/26`.
+
+- Spaces, dots and line breaks may differ between text and tag; digits and letters may not.
+- nopaper creates no tag. For a new case the tag must exist in paperless before the document is processed.
+- If several different file numbers with their own tag appear in the text, nopaper assigns none.
+
+`nopaper check` shows how many file-number tags it finds in paperless.
 
 ## Directories
 

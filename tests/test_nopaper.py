@@ -964,6 +964,42 @@ class NopaperTest(unittest.TestCase):
         self.assertIsNone(self.feld(85, "Erkannt: Rechnungssteller"))
         self.assertFalse(list((self.tmp / "aus").glob("*.xml")))
 
+    # ------------------------------------------------------------------ Aktenzeichen als Tag (E70)
+    def mit_az(self, *namen):
+        d = json.loads((self.tmp / "config.json").read_text())
+        d["tags"]["aktenzeichen"] = True
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        np = self.mit_termin(("termin", "terminzeit"))
+        for n in namen:
+            W.tags[max(W.tags) + 1] = n
+        return np
+
+    def test_aktenzeichen_tag_wird_zugeordnet(self):
+        np = self.mit_az("7 A 1234/26 MS", "3 K 99/25")
+        W.docs[87] = {"id": 87, "content": "x", "tags": [3, self.tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF LADUNG az", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.tagnamen(87), {"Scan", "7 A 1234/26 MS"})
+        self.assertEqual(self.feld(87, "Erkannt: Termin"), "2027-01-15")
+        self.assertEqual(len(W.patches), 1)
+
+    def test_aktenzeichen_ohne_tag_legt_nichts_an(self):
+        np = self.mit_az("3 K 99/25")
+        vorher = dict(W.tags)
+        W.docs[88] = {"id": 88, "content": "x", "tags": [3, self.tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF LADUNG az2", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.tagnamen(88), {"Scan"})
+        self.assertEqual(W.tags, vorher)
+
+    def test_aktenzeichen_tag_ohne_schalter(self):
+        np = self.mit_termin(("termin",))
+        W.tags[max(W.tags) + 1] = "7 A 1234/26 MS"
+        W.docs[89] = {"id": 89, "content": "x", "tags": [3, self.tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF LADUNG az3", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.tagnamen(89), {"Scan"})
+
     def test_beleg_ohne_lesbaren_betrag_geht_in_die_pruefung(self):
         # sieht nach Rechnung aus, aber der Betrag wurde nicht gelesen: Volltext-Weg MIT Pruef-Tag
         e = copy.deepcopy(LLM_RECHNUNG)
@@ -1026,6 +1062,15 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(e("Musterstadt, 12.11.2026\nLadung\nSie werden geladen. Näheres folgt.\n"),
                          ({}, ["TERMIN_NICHT_ERKANNT"]))                  # das Briefdatum ist kein Termin
         self.assertEqual(e("Ladung\nTermin anberaumt auf 31.02.2027, 11:00 Uhr\n")[1], ["TERMIN_NICHT_ERKANNT"])
+        # Aktenzeichen als Tag (E70)
+        t = termin.aktenzeichen_tags
+        text = "Az.: 7 A 1234/26 MS\nIhr Zeichen 17 A 1234/26, Rechnung 2025/26"
+        self.assertEqual(t(text, {"7 a 1234/26": 1, "rechnung": 2, "3 k 99/25": 3}), ([1], False))
+        self.assertEqual(t(text, {"7 a 1234/26": 1, "7 a 1234/26 ms": 4}), ([4], False))   # der laengere zaehlt
+        self.assertEqual(t(text, {"az 7a 1234 / 26": 1}), ([1], False))                    # Schreibweise frei
+        self.assertEqual(t("Az. 7 A\n1234/26", {"7 a 1234/26": 1}), ([1], False))           # Zeilenumbruch
+        self.assertEqual(t(text, {"a 1234/2": 1, "7 a 1234/261": 2, "234/26": 3}), ([], False))  # keine Teilstuecke
+        self.assertEqual(t(text, {"7 a 1234/26": 1, "17 a 1234/26": 5}), ([], True))        # zwei Verfahren
         # zwei verschiedene Aktenzeichen: keines uebernehmen
         w, _ = e("Ladung\nAz.: 7 A 1234/26\nAktenzeichen: 3 K 99/25\nTermin anberaumt auf 15.01.2027, 11:00 Uhr\n")
         self.assertNotIn("aktenzeichen", w)

@@ -22,7 +22,8 @@
     ],
     "pruefen": "nopaper prüfen",
     "ausloeser_nachbearbeitung": "nopaper Rechnung",
-    "ausloeser_text": "totext"
+    "ausloeser_text": "totext",
+    "aktenzeichen": false
   },
   "kategorie_tags": {
     "bewirtung": [

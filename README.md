@@ -281,11 +281,27 @@ Trägt ein Dokument den Tag aus `tags.ausloeser_text` und ist es eine gerichtlic
 |---|---|---|
 | `termin` | Datum | Tag der Verhandlung |
 | `terminzeit` | Text | Uhrzeit und Saal, z. B. „11:00 Uhr, Sitzungssaal V“ |
-| `aktenzeichen` | Text | Aktenzeichen des Gerichts |
+| `aktenzeichen` | Text | Aktenzeichen des Gerichts (nicht nötig, wenn Aktenzeichen Tags sind, siehe unten) |
 
 Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das bei „Termin“, „Verhandlung“, „geladen“ oder „anberaumt“ steht und dem eine Uhrzeit folgt. Ist der Termin nicht sicher lesbar oder stehen mehrere im Text (etwa bei einer Umladung), bleiben die Felder leer und das Dokument bekommt den Prüf-Tag.
 
 Das Feld ist eine Arbeitshilfe und ersetzt keine Fristenkontrolle: Liest die Texterkennung eine Ziffer falsch, steht der falsche Tag im Feld. Maßgeblich ist die Ladung selbst.
+
+## Aktenzeichen als Tag
+
+Sind die Aktenzeichen in paperless als Tags angelegt, ordnet nopaper sie zu. Dafür in der Konfiguration unter `tags` eintragen:
+
+```json
+"aktenzeichen": true
+```
+
+nopaper sucht dann in jedem Dokument, das es bearbeitet, nach den Namen der vorhandenen Tags, die ein Aktenzeichen sind, und hängt den passenden an. Als Aktenzeichen gilt ein Tag, dessen Name „Nummer/Jahr“ enthält, etwa `7 A 1234/26`.
+
+- Leerzeichen, Punkte und Zeilenumbrüche dürfen im Text anders stehen als im Tag, Ziffern und Buchstaben nicht.
+- nopaper legt keinen Tag an. Zu einem neuen Verfahren muss der Tag in paperless angelegt sein, bevor das Dokument bearbeitet wird.
+- Stehen mehrere verschiedene Aktenzeichen mit eigenem Tag im Text, ordnet nopaper keinen zu.
+
+`nopaper check` zeigt, wie viele Aktenzeichen-Tags es in paperless findet.
 
 ## Verzeichnisse
 

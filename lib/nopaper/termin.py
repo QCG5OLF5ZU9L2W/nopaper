@@ -78,6 +78,40 @@ def aktenzeichen(text: str) -> str | None:
     return werte.pop() if len(werte) == 1 else None
 
 
+_AZ_TAG = re.compile(r"\d\s*/\s*\d{2}")       # ein Tag-Name gilt als Aktenzeichen, wenn er "Nummer/Jahr" enthaelt
+_AZ_TEIL = re.compile(r"\d+|[a-zäöüß]+|/")
+_KEIN_ZEICHEN = r"[0-9a-zäöüß]"
+
+
+def ist_aktenzeichen(name: str) -> bool:
+    return _AZ_TAG.search(name) is not None
+
+
+def aktenzeichen_tags(text: str, tags: dict[str, int]) -> tuple[list[int], bool]:
+    """Vorhandene Tags, deren Name ein Aktenzeichen ist und woertlich im Text steht (E70). Leerzeichen,
+    Punkte, Doppelpunkte, Bindestriche und Zeilenumbrueche zwischen den Teilen duerfen abweichen, Ziffern
+    und Buchstaben nicht. Steckt ein Treffer in einem laengeren ("7 A 1/26" in "7 A 1/26 MS"), zaehlt nur
+    der laengere. Liefert (Tag-IDs, mehrdeutig): Passen mehrere verschiedene Aktenzeichen, wird keines
+    zugeordnet."""
+    treffer: dict[int, list[tuple[int, int]]] = {}
+    for name, tid in tags.items():
+        if not ist_aktenzeichen(name):
+            continue
+        teile = _AZ_TEIL.findall(name.lower())
+        muster = (f"(?<!{_KEIN_ZEICHEN})" + r"[\s.:\-]*".join(re.escape(t) for t in teile)
+                  + f"(?!{_KEIN_ZEICHEN})")
+        spannen = [m.span() for m in re.finditer(muster, text, re.I)]
+        if spannen:
+            treffer[tid] = spannen
+    def enthalten(tid: int) -> bool:
+        return all(any(o != tid and a2 <= a and e <= e2 and (e2 - a2) > (e - a)
+                       for o, sp in treffer.items() for a2, e2 in sp) for a, e in treffer[tid])
+    ids = sorted(t for t in treffer if not enthalten(t))
+    if len(ids) > 1:
+        return [], True
+    return ids, False
+
+
 def erkennen(text: str) -> tuple[dict, list[str]]:
     """Liefert ({termin: date, terminzeit: str, aktenzeichen: str}, Codes). Leer, wenn das Schreiben keine
     Ladung ist. Codes: TERMIN_ERKANNT | TERMIN_NICHT_ERKANNT | TERMIN_MEHRDEUTIG (die letzten beiden

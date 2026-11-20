@@ -622,6 +622,9 @@ class Nopaper:
             tags.discard(self.tag_text)  # der Volltext wird hier ohnehin erneuert
             tags |= set(self.tag_rechnung)
             tags |= set(self.tag_kategorie.get(inv["kategorie"], []))
+            az_tags, az_codes = self._aktenzeichen(roh, text)   # z.B. Kostenrechnung zu einem Verfahren
+            tags |= set(az_tags)
+            codes = codes + az_codes
             if issues and self.tag_pruefen:
                 tags.add(self.tag_pruefen)
             aenderung = {
@@ -720,8 +723,11 @@ class Nopaper:
             tfelder.update(self._code_felder(self.codes_lesen(original, workdir)))
         alt = doc.get("content") or ""
         ersetzen = ocr.text_nicht_schlechter(alt, text)
+        az_tags, az_codes = self._aktenzeichen(roh, text)
+        tcodes = tcodes + az_codes
         tags = set(doc.get("tags") or [])
         tags.discard(ausloeser)
+        tags |= set(az_tags)
         if self.tag_pruefen and (pruefen or {"TERMIN_NICHT_ERKANNT", "TERMIN_MEHRDEUTIG"} & set(tcodes)):
             tags.add(self.tag_pruefen)      # z.B. Ladung ohne sicheren Termin: ein Mensch muss hinsehen
         aenderung: dict = {"tags": sorted(tags)}
@@ -736,6 +742,20 @@ class Nopaper:
         log.info("text doc=%s %s lesbar alt=%d (%.0f%%) neu=%d (%.0f%%) codes=%s dauer=%.0fs", doc_id, ergebnis,
                  g_alt, q_alt * 100, g_neu, q_neu * 100, ",".join(codes) or "-", time.monotonic() - t0)
         return ergebnis
+
+    def _aktenzeichen(self, roh: str, text: str) -> tuple[list[int], list[str]]:
+        """Vorhandenen Aktenzeichen-Tag zuordnen (E70). nopaper legt keinen Tag an (E40): Steht ein
+        bezeichnetes Aktenzeichen im Text, zu dem es keinen Tag gibt, bleibt es beim Hinweis im Protokoll."""
+        if not self.cfg.tags_aktenzeichen:
+            return [], []
+        ids, mehrdeutig = termin.aktenzeichen_tags(roh + "\n" + text, self.pl.tags(frisch=True))
+        if mehrdeutig:
+            return [], ["AKTENZEICHEN_MEHRDEUTIG"]
+        if ids:
+            return ids, ["AKTENZEICHEN_ZUGEORDNET"]
+        if termin.aktenzeichen(roh) or termin.aktenzeichen(text):
+            return [], ["AKTENZEICHEN_OHNE_TAG"]
+        return [], []
 
     def _termin(self, roh: str, text: str) -> tuple[list[str], dict[int, object]]:
         """Ladung erkennen und den Termin fuer die eingerichteten Felder liefern (E62). Feste Regeln, kein

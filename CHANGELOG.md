@@ -2,6 +2,14 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.3
+
+- **Aktenzeichen als Tag** (E70): Mit `"aktenzeichen": true` unter `tags` hängt nopaper einem Dokument den vorhandenen Tag an, dessen Name ein Aktenzeichen ist und im Text steht. Gilt im Rechnungs- und im Volltext-Weg, nicht nur für Ladungen.
+  - nopaper legt keinen Tag an. Steht ein Aktenzeichen im Text, zu dem es keinen Tag gibt, steht `AKTENZEICHEN_OHNE_TAG` im Protokoll.
+  - Passen mehrere verschiedene Aktenzeichen-Tags, ordnet nopaper keinen zu (`AKTENZEICHEN_MEHRDEUTIG`).
+  - `nopaper check` zeigt, wie viele Aktenzeichen-Tags es in paperless gibt.
+- Das Feld `felder.aktenzeichen` bleibt möglich, ist dafür aber nicht mehr nötig.
+
 ## 1.8.2
 
 - **Ein Auslöser für jedes Dokument** (E69): Trägt ein Dokument den Tag aus `tags.ausloeser_nachbearbeitung` und ist es keine Rechnung, behandelt nopaper es wie im Volltext-Weg: Volltext erneuern, Termin einer Ladung und Codes in die Felder, Auslöser entfernen. Keine Rechnungs-Tags, kein Sidecar, kein Prüf-Tag für gewöhnliche Schreiben.
