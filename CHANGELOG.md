@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.4
+
+- **Kontext je Aufruf nach Bedarf** (E76): `modelle.kontext` ist jetzt die Obergrenze, nicht mehr der Wert für jeden Aufruf. Jeder Aufruf bekommt die kleinste Stufe (8.192, 16.384, 32.768, 65.536 Token), in die er passt. Ein kurzes Dokument und das einzelne Seitenbild des Bild-Rückfalls laufen mit 8.192, drei Seitenbilder mit 16.384; nur lange Dokumente bekommen den großen Kontext.
+- Anlass: Bei `kontext` 65536 belegte jedes Modell 15 GB und mehr, es passte immer nur eines auf eine Karte mit 24 GB, und Ollama lud bei jedem Wechsel neu.
+- Wechselt die Stufe eines Modells (langes Dokument nach kurzen), lädt Ollama dieses Modell einmal neu.
+
 ## 1.9.3
 
 - **Vorlauf** (E75): Während ein Dokument am Sprachmodell ist, holt und erkennt nopaper schon die nächsten beiden (Original laden, Prüfsumme, Texterkennung). Die Grafikkarte wartet dadurch nicht mehr auf die Texterkennung. Am Sprachmodell bleibt es bei einem Dokument nach dem anderen.

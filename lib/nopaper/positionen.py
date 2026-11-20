@@ -158,7 +158,7 @@ def lesen(ki, modell: str, text: str, max_chars: int = ABSCHNITT_ZEICHEN) -> lis
     alle: list[dict] = []
     for teil in abschnitte(text, max_chars)[:MAX_ABSCHNITTE]:
         try:
-            antwort = ki.chat_json(modell, PROMPT, teil, SCHEMA)
+            antwort = ki.chat_json(modell, PROMPT, teil, SCHEMA, num_ctx=min(8192, ki.num_ctx))
         except ValueError:          # keine lesbare Antwort fuer diesen Abschnitt: die Summenprobe faengt es
             continue
         if isinstance(antwort, dict):
