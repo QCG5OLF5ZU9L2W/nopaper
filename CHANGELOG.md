@@ -2,6 +2,17 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.6.0
+
+- **Neue Betriebsart „erst paperless“** (`"betriebsart": "paperless"`, Entscheidung E61): Der Scanner liefert direkt an paperless, nopaper reagiert nur noch auf die Auslöser-Tags und schreibt alles zurück. nopaper ist dabei zustandslos: keine Datenbank, kein Eingangs-, Ausgangs- oder Fehlerordner.
+  - Der **Sidecar steht als Feld am Dokument** (`felder.sidecar`, Datentyp für langen Text).
+  - Volltext, Tags, Felder, Titel und Sidecar gehen in einem Aufruf an paperless.
+  - Duplikate werden über die Erkannt-Felder in paperless gesucht.
+  - `nopaper status` zeigt, wie viele Dokumente einen Auslöser-Tag tragen.
+  - nopaper liefert in dieser Betriebsart nicht an kumero ein; kumero holt den Sidecar aus paperless.
+- **Der bisherige Scanner-Betrieb bleibt der Standard und ist unverändert.** Ohne den Schlüssel `betriebsart` ändert sich nichts.
+- Noch nicht gegen ein echtes paperless erprobt.
+
 ## 1.5.3
 
 - **Lange Rechnungen vollständig lesen:** Wie viel Text das Modell bekommt, richtet sich jetzt nach `modelle.kontext` (12.000 Zeichen je 8.192 Token, bisher fest 12.000 Zeichen). Mit großem Kontext geht eine mehrseitige Rechnung von Anfang bis Ende an das Modell. Mit dem Standardwert 8192 ändert sich für Dokumente bis 12.000 Zeichen nichts.

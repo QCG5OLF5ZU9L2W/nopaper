@@ -216,6 +216,42 @@ nopaper-aktivieren         # opens the network to the paperless host only, then 
 
 As an alternative, `nopaper paperless-skript` prints a script for the Django shell of paperless that creates the user, tags and fields. It is not required.
 
+## Operating mode "paperless first"
+
+Since version 1.6.0 nopaper can work behind paperless instead of in front of it (decision E61 in `AGENTS.md`). This is the target architecture; scanner mode with incoming folders remains the default for now.
+
+| | Scanner mode (default) | paperless first |
+|---|---|---|
+| The scanner delivers to | nopaper's incoming folders | paperless (consume folder) |
+| nopaper is triggered by | a new file in the incoming folder | a trigger tag on the document |
+| Sidecar | file in the output folder | field on the document in paperless |
+| Data on the nopaper machine | database, incoming, output, error folder | none |
+| If nopaper fails | scans stay in the incoming folder | documents are in paperless anyway |
+
+Setup:
+
+1. Create a custom field for the sidecar in paperless, for example `Erkannt: Sidecar`, with a data type for long text. An ordinary text field is too short; `nopaper check` reports this.
+2. Create a workflow in paperless that gives new documents the trigger tag: `nopaper Rechnung` for invoices, `totext` for everything else. The easiest way is two scan profiles that paperless can tell apart.
+3. Point the scanner at the consume folder of paperless.
+4. Add two entries to `/etc/nopaper/config.json` and remove the `kumero` section if present:
+
+```bash
+python3 -I - <<'PY'
+import json
+p = "/etc/nopaper/config.json"
+d = json.load(open(p, encoding="utf-8"))
+d["betriebsart"] = "paperless"
+d["felder"]["sidecar"] = "Erkannt: Sidecar"
+d.pop("kumero", None)
+open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+PY
+nopaper check && nopaper-aktivieren
+```
+
+Afterwards `nopaper status` shows how many documents in paperless still carry a trigger tag. Accounting fetches the sidecar from the field; in this mode nopaper does not deliver to kumero itself.
+
+Limits: so far this mode has only run in the offline tests. The cross-check between scan folder and AI is dropped, because the tag counts as the decision. Anyone who may edit the document in paperless can also change the sidecar field.
+
 ## The three paths
 
 | Path | Trigger | What nopaper does |

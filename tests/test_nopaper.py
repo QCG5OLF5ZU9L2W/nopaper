@@ -57,7 +57,8 @@ FELDER = {"Erkannt: Rechnungsnummer": "string", "Erkannt: Rechnungsdatum": "date
           "Erkannt: Rechnungssteller": "string", "Erkannt: Betrag brutto": "monetary",
           "Erkannt: Betrag netto": "monetary", "Erkannt: Steuer_High": "monetary",
           "Erkannt: Steuer_Low": "monetary", "Erkannt: Zahlbetrag": "monetary", "Erkannt: Skonto": "string",
-          "IBAN": "string", "Erkannt: Belegart": "string", "Erkannt: Verwendungszweck": "string"}
+          "IBAN": "string", "Erkannt: Belegart": "string", "Erkannt: Verwendungszweck": "string",
+          "Erkannt: Sidecar": "longtext"}
 
 
 class Welt:
@@ -73,6 +74,8 @@ class Welt:
         self.bild_extraktion = None
         self.glaettung_kaputt = False
         self.llm_calls = []
+        self.patches = []                 # (Dokument-ID, geaenderte Schluessel) je PATCH
+        self.feldabfrage = "ok"           # ok | 400 (aeltere paperless-Fassung ohne custom_field_query)
         # nachgebautes kumero (Buchhaltung): Verhalten und Mitschnitt
         self.kumero_modus = "ok"          # ok | 503 | 422 | 401 | 404 | 429 | langsam | falscher_hash
         self.kumero_status_modus = "ok"   # ok | 401 | 404 | 503 | nicht_bereit
@@ -166,6 +169,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(list(W.tasks.values())[-5:])
             t = W.tasks.get(q["task_id"])
             return self._send([t] if t else [])
+        if u.path == "/api/documents/" and "custom_field_query" in q:
+            if W.feldabfrage != "ok":
+                return self._send({"detail": "unbekannter Filter"}, code=400)
+            abfrage = json.loads(q["custom_field_query"])
+            teile = abfrage[1] if abfrage[0] == "AND" else [abfrage]
+
+            def passt(d):
+                werte = {f["field"]: f.get("value") for f in d.get("custom_fields") or []}
+                return all(op == "iexact" and str(werte.get(fid, "")).lower() == str(wert).lower()
+                           for fid, op, wert in teile)
+            return self._send({"next": None, "results": [{"id": i} for i, d in sorted(W.docs.items()) if passt(d)]})
         if u.path == "/api/documents/":
             tid = int(q["tags__id__all"])
             return self._send({"next": None, "results": [{"id": i} for i, d in sorted(W.docs.items())
@@ -213,6 +227,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         body = json.loads(self._body())
         doc = W.docs[int(self.path.rstrip("/").split("/")[3])]
+        W.patches.append((doc["id"], sorted(body)))
         doc.update({k: v for k, v in body.items() if k in ("content", "tags", "custom_fields", "owner", "title")})
         self._send({"id": doc["id"]})
 
@@ -746,6 +761,142 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(note["quelle"], "nachbearbeitung")
         self.assertEqual(note["sha256-original"], hashlib.sha256(b"%PDF RECHNUNG alt").hexdigest())
         self.assertEqual(list((self.tmp / "arbeit").iterdir()), [])  # nichts liegen geblieben
+
+    # ------------------------------------------------------------------ Betriebsart "paperless" (E61)
+    def paperless_zuerst(self, **extra):
+        d = json.loads((self.tmp / "config.json").read_text())
+        d["betriebsart"] = "paperless"
+        d["felder"]["sidecar"] = "Erkannt: Sidecar"
+        d.pop("eingang"), d.pop("ausgang")          # Ordner sind in dieser Betriebsart keine Pflicht
+        d.update(extra)
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        self.np.state.db.close()
+        for alt in ("arbeit", "aus", "fehler", "zustand"):      # Reste der Scanner-Instanz aus setUp
+            shutil.rmtree(self.tmp / alt, ignore_errors=True)
+        self.cfg = config.load(self.tmp / "config.json")
+        self.np = Nopaper(self.cfg, ocr_text=fake_ocr, seite_als_bild=lambda o, w: "QklMRA==",
+                          zweite_lesung=lambda o, w, s="deu": "")
+        return self.np
+
+    def feld(self, doc_id, name):
+        fid = next(i for i, (n, _) in W.felder.items() if n == name)
+        return next((f["value"] for f in W.docs[doc_id]["custom_fields"] if f["field"] == fid), None)
+
+    def test_paperless_zuerst_rechnung(self):
+        np = self.paperless_zuerst()
+        W.docs[70] = {"id": 70, "content": "Text von paperless", "tags": [3, 5],
+                      "custom_fields": [{"field": 99, "value": "x"}], "owner": 3,
+                      "original": b"%PDF RECHNUNG pz", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(self.tagnamen(70), {"Scan", "Rechnung", "Eingangsrechnung"})   # Ausloeser entfernt
+        self.assertEqual(self.feld(70, "Erkannt: Rechnungsnummer"), "RE-2026-0815")
+        self.assertIn({"field": 99, "value": "x"}, W.docs[70]["custom_fields"])        # fremde Felder bleiben
+        # der Sidecar steht als Feld am Dokument, mit Dokument-ID und Pruefsumme des Originals
+        root = ET.fromstring(self.feld(70, "Erkannt: Sidecar"))
+        c = root.find(".//{%s}IncludedNote/{%s}Content" % (invoice.NS["ram"], invoice.NS["ram"])).text
+        note = dict(l.split("=", 1) for l in c.splitlines()[1:])
+        self.assertEqual(note["paperless-document-id"], "70")
+        self.assertEqual(note["quelle"], "nachbearbeitung")
+        self.assertEqual(note["sha256-original"], hashlib.sha256(b"%PDF RECHNUNG pz").hexdigest())
+        self.assertEqual(note["pruefstatus"], "ok", note.get("pruefhinweise"))
+        # alles in EINEM Aufruf: Volltext, Tags, Felder (mit Sidecar) und Titel
+        self.assertEqual(W.patches, [(70, ["content", "custom_fields", "tags", "title"])])
+        # nopaper haelt nichts: keine Datenbank, kein Ausgang, kein Fehlerordner, Arbeitsverzeichnis leer
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir() if p.is_dir()), ["arbeit", "ein"])
+        self.assertEqual(list((self.tmp / "arbeit").iterdir()), [])
+        self.assertFalse(list(self.tmp.rglob("*.db")) + list(self.tmp.rglob("*.xml")))
+        self.assertEqual(W.uploads, 0)
+
+    def test_paperless_zuerst_kein_scanner_eingang(self):
+        np = self.paperless_zuerst()
+        f = self.scan("rechnungen", "liegt.pdf", b"%PDF RECHNUNG liegt")
+        np.ein_durchlauf()
+        self.assertTrue(f.exists(), "der Eingangsordner wird in dieser Betriebsart nicht angefasst")
+        self.assertEqual((W.uploads, W.patches), (0, []))
+
+    def test_paperless_zuerst_duplikat_aus_paperless(self):
+        np = self.paperless_zuerst()
+        nr = next(i for i, (n, _) in W.felder.items() if n == "Erkannt: Rechnungsnummer")
+        st = next(i for i, (n, _) in W.felder.items() if n == "Erkannt: Rechnungssteller")
+        W.docs[40] = {"id": 40, "content": "", "tags": [1], "owner": None, "original": b"x", "archive": b"A",
+                      "custom_fields": [{"field": nr, "value": "re-2026-0815"},
+                                        {"field": st, "value": "Praxis Dr. Beispiel"}]}
+        W.docs[71] = {"id": 71, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG dup", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertIn("DUPLIKAT_VON_DOKUMENT_40", self.feld(71, "Erkannt: Sidecar"))
+        self.assertIn("nopaper prüfen", self.tagnamen(71))
+        # ein zweiter Lauf ueber dasselbe Dokument haelt es nicht fuer sein eigenes Duplikat
+        W.docs[40]["tags"] = [5]
+        W.docs[40]["original"] = b"%PDF RECHNUNG erste"
+        W.docs[71]["custom_fields"] = []
+        np._letzte_abfrage = 0
+        np.ein_durchlauf()
+        self.assertNotIn("DUPLIKAT", self.feld(40, "Erkannt: Sidecar"))
+
+    def test_paperless_zuerst_alte_fassung_ohne_feldabfrage(self):
+        np = self.paperless_zuerst()
+        W.feldabfrage = "400"
+        W.docs[72] = {"id": 72, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG alt", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertNotIn(5, W.docs[72]["tags"])                 # trotzdem verarbeitet, nur ohne Duplikatsuche
+        self.assertIn("SCAN-SIDECAR", self.feld(72, "Erkannt: Sidecar"))
+
+    def test_paperless_zuerst_fehler_laesst_alles_wie_es_war(self):
+        np = self.paperless_zuerst()
+        np.ki.url = "http://127.0.0.1:1"                         # Ollama nicht erreichbar
+        W.docs[73] = {"id": 73, "content": "Text von paperless", "tags": [3, 5], "custom_fields": [],
+                      "owner": None, "original": b"%PDF RECHNUNG weg", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(W.patches, [])
+        self.assertEqual((W.docs[73]["content"], W.docs[73]["tags"]), ("Text von paperless", [3, 5]))
+        self.assertEqual(np.state.nach(73)["versuche"], 1)       # Zaehler nur im Arbeitsspeicher
+        # Wartezeit: gleich noch einmal abfragen versucht es nicht sofort wieder
+        np.ki.url = self.base
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(W.patches, [])
+        np.state.nach_setzen(73, 1, 0, "VORUEBERGEHEND")         # Wartezeit abgelaufen
+        np.nachbearbeitung_abfragen()
+        self.assertNotIn(5, W.docs[73]["tags"])
+        self.assertIsNone(np.state.nach(73))
+
+    def test_paperless_zuerst_volltext(self):
+        np = self.paperless_zuerst()
+        tt = next(i for i, n in W.tags.items() if n == "totext")
+        W.docs[74] = {"id": 74, "content": "x", "tags": [3, tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF BRIEF pz", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(self.tagnamen(74), {"Scan"})
+        self.assertIn("Unterlagen", W.docs[74]["content"])
+        self.assertEqual(W.docs[74]["custom_fields"], [])        # kein Sidecar, keine Felder
+
+    def test_paperless_zuerst_konfiguration(self):
+        d = json.loads((self.tmp / "config.json").read_text())
+
+        def laden(**aend):
+            x = copy.deepcopy(d)
+            for k, v in aend.items():
+                if v is None:
+                    x.pop(k, None)
+                else:
+                    x[k] = v
+            (self.tmp / "c2.json").write_text(json.dumps(x))
+            return config.load(self.tmp / "c2.json")
+        self.assertEqual(laden().betriebsart, "scanner")                       # Standard bleibt wie bisher
+        with self.assertRaisesRegex(config.ConfigError, "betriebsart"):
+            laden(betriebsart="irgendwas")
+        with self.assertRaisesRegex(config.ConfigError, "felder.sidecar"):      # ohne Sidecar-Feld kein Start
+            laden(betriebsart="paperless")
+        mit = dict(d["felder"], sidecar="Erkannt: Sidecar")
+        with self.assertRaisesRegex(config.ConfigError, "nur in der betriebsart"):
+            laden(felder=mit)
+        self.assertTrue(laden(betriebsart="paperless", felder=mit, eingang=None, ausgang=None).zustandslos)
+        with self.assertRaisesRegex(config.ConfigError, "kumero"):
+            laden(betriebsart="paperless", felder=mit,
+                  kumero={"url": "https://k.example.org", "mandant": "p", "token_datei": "/x"})
+        with self.assertRaisesRegex(config.ConfigError, "Pflichtangabe fehlt: eingang"):
+            laden(eingang=None)                                                 # Scanner-Betrieb braucht die Ordner
 
     def test_ollama_weg(self):
         self.np.ki.url = "http://127.0.0.1:1"

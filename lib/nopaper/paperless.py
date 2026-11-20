@@ -230,6 +230,15 @@ class Paperless:
     def aendern(self, doc_id: int, daten: dict) -> None:
         self.json("PATCH", f"/api/documents/{doc_id}/", daten)
 
+    def mit_feldwerten(self, bedingungen: list[tuple[int, str]]) -> list[int]:
+        """IDs der Dokumente, bei denen ALLE genannten benutzerdefinierten Felder genau den Wert haben
+        (Gross-/Kleinschreibung egal). Nutzt custom_field_query (paperless-ngx ab 2.13)."""
+        teile = [[fid, "iexact", wert] for fid, wert in bedingungen]
+        abfrage = teile[0] if len(teile) == 1 else ["AND", teile]
+        res = self.alle("documents", {"custom_field_query": json.dumps(abfrage, ensure_ascii=False),
+                                      "fields": "id", "truncate_content": "true"})
+        return [int(d["id"]) for d in res]
+
     def mit_tag(self, tag_id: int) -> list[int]:
         res = self.alle("documents", {"tags__id__all": str(tag_id), "fields": "id",
                                       "truncate_content": "true", "ordering": "added"})

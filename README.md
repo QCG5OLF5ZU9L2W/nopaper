@@ -214,6 +214,42 @@ nopaper-aktivieren         # Netzfreigabe nur zum paperless-Host, dann Start
 
 `nopaper paperless-skript` gibt als Alternative ein Skript für die Django-Shell von paperless aus, das Benutzer, Tags und Felder anlegt. Es ist nicht nötig.
 
+## Betriebsart „erst paperless“
+
+Seit Version 1.6.0 kann nopaper hinter paperless arbeiten statt davor (Entscheidung E61 in `AGENTS.md`). Das ist die Zielarchitektur; der Scanner-Betrieb mit Eingangsordnern bleibt vorerst der Standard.
+
+| | Scanner-Betrieb (Standard) | erst paperless |
+|---|---|---|
+| Der Scanner liefert an | Eingangsordner von nopaper | paperless (Consume-Ordner) |
+| nopaper wird angestoßen durch | neue Datei im Eingang | Auslöser-Tag am Dokument |
+| Sidecar | Datei im Ausgangsordner | Feld am Dokument in paperless |
+| Daten auf dem nopaper-Rechner | Datenbank, Eingang, Ausgang, Fehlerordner | keine |
+| Fällt nopaper aus | Scans bleiben im Eingang liegen | Dokumente sind trotzdem in paperless |
+
+Einrichten:
+
+1. In paperless ein benutzerdefiniertes Feld für den Sidecar anlegen, zum Beispiel `Erkannt: Sidecar`, mit einem Datentyp für langen Text. Ein gewöhnliches Textfeld ist zu kurz; `nopaper check` meldet das.
+2. In paperless einen Arbeitsablauf anlegen, der neuen Dokumenten den Auslöser-Tag gibt: `nopaper Rechnung` für Rechnungen, `totext` für alles andere. Am einfachsten über zwei Scanprofile, die paperless unterscheiden kann.
+3. Den Scanner auf den Consume-Ordner von paperless umstellen.
+4. In `/etc/nopaper/config.json` zwei Einträge ergänzen und, falls vorhanden, den Abschnitt `kumero` entfernen:
+
+```bash
+python3 -I - <<'PY'
+import json
+p = "/etc/nopaper/config.json"
+d = json.load(open(p, encoding="utf-8"))
+d["betriebsart"] = "paperless"
+d["felder"]["sidecar"] = "Erkannt: Sidecar"
+d.pop("kumero", None)
+open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+PY
+nopaper check && nopaper-aktivieren
+```
+
+`nopaper status` zeigt danach, wie viele Dokumente in paperless noch einen Auslöser-Tag tragen. Die Buchhaltung holt den Sidecar aus dem Feld; nopaper liefert in dieser Betriebsart nicht selbst an kumero ein.
+
+Grenzen: Die Betriebsart ist bisher nur in den Offline-Tests gelaufen. Die Gegenprobe zwischen Scan-Ordner und KI entfällt, weil der Tag als Entscheidung gilt. Wer das Dokument in paperless bearbeiten darf, kann auch das Sidecar-Feld ändern.
+
 ## Die drei Wege
 
 | Weg | Auslöser | Was nopaper tut |

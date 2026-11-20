@@ -132,8 +132,10 @@ def main(argv=None) -> int:
 
     if args.cmd == "check":
         ok = True
-        for d in (cfg.eingang_rechnungen, cfg.eingang_dokumente, cfg.fehler, cfg.ausgang_rechnungsdaten,
-                  cfg.arbeit, cfg.zustand):
+        print(f"     Betriebsart: {cfg.betriebsart}" + (" (erst paperless, zustandslos)" if cfg.zustandslos else ""))
+        for d in ((cfg.arbeit,) if cfg.zustandslos else
+                  (cfg.eingang_rechnungen, cfg.eingang_dokumente, cfg.fehler, cfg.ausgang_rechnungsdaten,
+                   cfg.arbeit, cfg.zustand)):
             w = d.is_dir() and os.access(d, os.W_OK)
             ok &= w
             print(f"{'ok  ' if w else 'FEHL'} Verzeichnis {d}")
@@ -159,6 +161,14 @@ def main(argv=None) -> int:
                 "Format 2.x" if "related_document" in alle[0] else "UNBEKANNTES FORMAT")
             ok &= not fmt.startswith("UNBEKANNT")
             print(f"{'FEHL' if fmt.startswith('UNBEKANNT') else 'ok  '} paperless Aufgaben-API ({fmt})")
+            if cfg.zustandslos:
+                typ = np.felder["sidecar"][1]
+                if typ in ("string", "url"):
+                    ok = False
+                    print(f"FEHL Feld '{cfg.felder['sidecar']}' hat den Datentyp '{typ}' – der ist fuer kurze "
+                          "Werte. Der Sidecar braucht ein Feld fuer langen Text.")
+                else:
+                    print(f"ok   Sidecar-Feld '{cfg.felder['sidecar']}' (Datentyp {typ or 'unbekannt'})")
             print(f"     offene Nachbearbeitungen: {len(np.pl.mit_tag(np.tag_ausloeser))}")
             if np.tag_text:
                 print(f"     offene Text-Erneuerungen: {len(np.pl.mit_tag(np.tag_text))}")
@@ -177,6 +187,16 @@ def main(argv=None) -> int:
                 print(f"WARN kumero: {code} – Sidecars bleiben in der Warteschlange")
         print("Alles in Ordnung." if ok else "Es gibt Fehler – siehe oben.")
         return 0 if ok else 1
+
+    if args.cmd == "status" and cfg.zustandslos:
+        # E61: der Zustand steht in paperless – offen ist, was einen Ausloeser-Tag traegt
+        np.ids_laden()
+        print(f"offen  Rechnung auslesen   {len(np.pl.mit_tag(np.tag_ausloeser))}")
+        if np.tag_text:
+            print(f"offen  Volltext erneuern   {len(np.pl.mit_tag(np.tag_text))}")
+        if np.tag_pruefen:
+            print(f"zur Pruefung markiert      {len(np.pl.mit_tag(np.tag_pruefen))}")
+        return 0
 
     if args.cmd == "status":
         rows = np.state.db.execute("SELECT status, COUNT(*) n FROM eingang GROUP BY status").fetchall()
