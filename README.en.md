@@ -285,7 +285,7 @@ If a document carries the tag from `tags.ausloeser_text` and is a court summons,
 | `terminzeit` | Text | time and room, e.g. "11:00 Uhr, Sitzungssaal V" |
 | `aktenzeichen` | Text | the court's file number (not needed if file numbers are tags, see below) |
 
-Detection uses fixed rules, no language model: only a date that stands next to "Termin", "Verhandlung", "geladen" or "anberaumt" and is followed by a time of day counts. If the date cannot be read reliably or several are in the text (for example a rescheduling notice), the fields stay empty and the document gets the review tag.
+Detection uses fixed rules, no language model: only a date that stands next to "Termin", "Verhandlung", "geladen" or "anberaumt" and is followed by a time of day counts. If the date cannot be read reliably or several are in the text (for example a rescheduling notice), the fields stay empty and the document gets the review tag. If a hearing was rescheduled, the new date goes into the field when the letter marks it as such ("verlegt auf", "neuer Termin", "nunmehr auf").
 
 The field is a working aid and does not replace deadline control: if text recognition misreads a digit, the wrong day ends up in the field. The summons itself is authoritative.
 

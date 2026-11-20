@@ -1026,8 +1026,9 @@ class NopaperTest(unittest.TestCase):
         W.docs[82] = {"id": 82, "content": "x", "tags": [self.tt], "custom_fields": [], "owner": None,
                       "original": b"%PDF UMLADUNG", "archive": b"A"}
         np.nachbearbeitung_abfragen()
-        self.assertIsNone(self.feld(82, "Erkannt: Termin"))             # zwei Termine im Text: nicht raten
-        self.assertEqual(self.tagnamen(82), {"nopaper prüfen"})
+        self.assertEqual(self.feld(82, "Erkannt: Termin"), "2027-01-15")   # der als neu bezeichnete Termin
+        self.assertEqual(self.feld(82, "Erkannt: Terminzeit"), "11:00 Uhr, Saal 2")
+        self.assertEqual(self.tagnamen(82), set())                           # eindeutig: kein Pruef-Tag
 
     def test_brief_bekommt_keine_termin_felder(self):
         np = self.mit_termin()
@@ -1062,6 +1063,20 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(e("Musterstadt, 12.11.2026\nLadung\nSie werden geladen. Näheres folgt.\n"),
                          ({}, ["TERMIN_NICHT_ERKANNT"]))                  # das Briefdatum ist kein Termin
         self.assertEqual(e("Ladung\nTermin anberaumt auf 31.02.2027, 11:00 Uhr\n")[1], ["TERMIN_NICHT_ERKANNT"])
+        # Verlegung (E71): der neue Termin zaehlt, auch wenn er frueher liegt und spaeter im Text steht
+        w, c = e("Ladung\nSehr geehrte Frau Mustermann, der Termin 17. Dezember 2026, 13:00 Uhr ist durch\n"
+                 "richterliche Verfügung verlegt worden auf: Donnerstag, 10.12.2026, 11:00 Uhr, Saal 3\n")
+        self.assertEqual((w["termin"], w["terminzeit"], c),
+                         (dt.date(2026, 12, 10), "11:00 Uhr, Saal 3", ["TERMIN_ERKANNT", "TERMIN_VERLEGT"]))
+        w, c = e("Umladung\nTermin am 10.12.2026, 10:00 Uhr entfaellt. Sie werden nunmehr auf den\n"
+                 "15.01.2027, 9 Uhr geladen.\n")
+        self.assertEqual((w["termin"], c), (dt.date(2027, 1, 15), ["TERMIN_ERKANNT", "TERMIN_VERLEGT"]))
+        # zwei Termine ohne Angabe, welcher gilt: nicht raten
+        w, c = e("Ladung\nTermin am 10.12.2026, 10:00 Uhr. Weiterer Termin zur Verhandlung am 15.01.2027, 9 Uhr.\n")
+        self.assertEqual((w.get("termin"), c), (None, ["TERMIN_MEHRDEUTIG"]))
+        # zwei als neu bezeichnete Termine: ebenfalls nicht raten
+        w, c = e("Ladung\nTermin verlegt auf 10.12.2026, 10:00 Uhr. Termin verlegt auf 15.01.2027, 9 Uhr.\n")
+        self.assertEqual(c, ["TERMIN_MEHRDEUTIG"])
         # Aktenzeichen als Tag (E70)
         t = termin.aktenzeichen_tags
         text = "Az.: 7 A 1234/26 MS\nIhr Zeichen 17 A 1234/26, Rechnung 2025/26"
