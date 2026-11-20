@@ -2,6 +2,14 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.0
+
+- **Strichcodes und QR-Codes** (E67): nopaper liest die Codes der ersten drei Seiten mit `zbarimg` (Paket `zbar-tools`, wird von `install.sh` mitinstalliert), ohne Sprachmodell.
+  - `felder.barcode` (Text) nimmt die Strichcodes auf, `felder.qrcode` (langer Text) die QR-Codes. Beide optional, im Rechnungsweg und im Volltext-Weg.
+  - **Überweisungs-QR-Code auf Rechnungen:** IBAN und Verwendungszweck werden aus dem Code übernommen; stimmt sein Betrag mit dem gelesenen überein, gilt der Betrag als belegt, sonst geht der Beleg in die Prüfung.
+  - `nopaper check` zeigt, ob der Leser vorhanden ist.
+- Noch nicht mit `zbarimg` selbst erprobt.
+
 ## 1.7.4
 
 - **Dokumentdatum in paperless** (E66): In der Betriebsart „erst paperless“ setzt nopaper „Erstellt am“ auf das Rechnungsdatum, wenn dieses gesichert ist. paperless nimmt sonst das erste Datum im Text, auf Formularen oft ein Geburtsdatum. Abschaltbar mit `"dokumentdatum_setzen": false`.

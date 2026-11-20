@@ -139,6 +139,15 @@ def main(argv=None) -> int:
             w = d.is_dir() and os.access(d, os.W_OK)
             ok &= w
             print(f"{'ok  ' if w else 'FEHL'} Verzeichnis {d}")
+        from . import codes as qr
+        will_codes = "barcode" in cfg.felder or "qrcode" in cfg.felder
+        if qr.verfuegbar():
+            print("ok   Strich- und QR-Codes (zbarimg)")
+        elif will_codes:
+            ok = False
+            print("FEHL zbarimg fehlt – felder.barcode/qrcode brauchen das Paket zbar-tools (install.sh erneut starten)")
+        else:
+            print("     zbarimg fehlt – Strich- und QR-Codes werden nicht gelesen (Paket zbar-tools)")
         try:
             models = np.ki.modelle()
             noetig = [cfg.modell_text, cfg.modell_bild, cfg.modell_glaettung if cfg.modell_glaettung != "aus" else "",

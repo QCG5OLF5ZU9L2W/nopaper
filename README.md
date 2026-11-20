@@ -28,7 +28,7 @@ Entscheidungen und Regeln stehen in [`AGENTS.md`](AGENTS.md). Sie sind verbindli
 - ein laufendes paperless-ngx, erreichbar per HTTPS
 - Internet nur während der Installation (Pakete, Ollama, Modelle)
 
-Außer Paketen der Distribution (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`; bei Ubuntu aus der Komponente `universe`) und Ollama gibt es keine Abhängigkeiten. Der Code nutzt nur die Python-Standardbibliothek.
+Außer Paketen der Distribution (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`, `zbar-tools`; bei Ubuntu aus der Komponente `universe`) und Ollama gibt es keine Abhängigkeiten. Der Code nutzt nur die Python-Standardbibliothek.
 
 ## Installation Schritt für Schritt
 
@@ -259,6 +259,19 @@ Grenzen: Die Betriebsart ist bisher nur in den Offline-Tests gelaufen. Die Gegen
 | Volltext | Tag aus `tags.ausloeser_text` am Dokument | Text neu erkennen und glätten, nur den Volltext ersetzen; Tag entfernen |
 
 Der Volltext wird nur ersetzt, wenn der neue Text nicht schlechter ist als der vorhandene.
+
+## Strichcodes und QR-Codes
+
+nopaper liest die Strich- und QR-Codes der ersten drei Seiten eines Dokuments. Dafür in paperless die Felder anlegen und unter `felder` eintragen; beide sind optional:
+
+| Schlüssel in `felder` | Datentyp | Inhalt |
+|---|---|---|
+| `barcode` | Text | alle Strichcodes, getrennt durch „ \| “ |
+| `qrcode` | langer Text | alle QR-Codes |
+
+Steht auf einer Rechnung ein Überweisungs-QR-Code, übernimmt nopaper daraus IBAN und Verwendungszweck, auch ohne diese beiden Felder. Stimmt der Betrag im Code nicht mit dem gelesenen Betrag überein, bekommt das Dokument den Prüf-Tag.
+
+Gelesen wird mit `zbarimg` aus dem Paket `zbar-tools`, das `install.sh` mitinstalliert. `nopaper check` zeigt, ob es vorhanden ist.
 
 ## Termin aus einer Ladung
 

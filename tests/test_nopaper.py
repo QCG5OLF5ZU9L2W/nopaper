@@ -76,7 +76,7 @@ FELDER = {"Erkannt: Rechnungsnummer": "string", "Erkannt: Rechnungsdatum": "date
           "Erkannt: Steuer_Low": "monetary", "Erkannt: Zahlbetrag": "monetary", "Erkannt: Skonto": "string",
           "IBAN": "string", "Erkannt: Belegart": "string", "Erkannt: Verwendungszweck": "string",
           "Erkannt: Sidecar": "longtext", "Erkannt: Termin": "date", "Erkannt: Terminzeit": "string",
-          "Erkannt: Aktenzeichen": "string"}
+          "Erkannt: Aktenzeichen": "string", "Erkannt: Barcode": "string", "Erkannt: QR-Code": "longtext"}
 
 
 class Welt:
@@ -1203,6 +1203,114 @@ class NopaperTest(unittest.TestCase):
             self.assertEqual(note["pruefstatus"], "pruefen")
         finally:
             ocr.seiten_als_bilder = alt
+
+    # ------------------------------------------------------------------ Strich- und QR-Codes (E67)
+    GIRO = "BCD\n002\n1\nSCT\nCOBADEFFXXX\nPraxis Dr. Beispiel\nDE89370400440532013000\nEUR1234.56\n\n\nRE-2026-0815 Kunde 4711"
+
+    def mit_codes(self, gelesen, felder=("barcode", "qrcode")):
+        from nopaper import codes
+        namen = {"barcode": "Erkannt: Barcode", "qrcode": "Erkannt: QR-Code"}
+        d = json.loads((self.tmp / "config.json").read_text())
+        for k in felder:
+            d["felder"][k] = namen[k]
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        if hasattr(self.np.state, "db"):
+            self.np.state.db.close()
+        self.cfg = config.load(self.tmp / "config.json")
+        self.aufrufe = []
+
+        def lesen(original, workdir):
+            self.aufrufe.append(original.name)
+            return [codes.Code(t, i) for t, i in gelesen]
+        self.np = Nopaper(self.cfg, ocr_text=fake_ocr, seite_als_bild=lambda o, w: "QklMRA==",
+                          zweite_lesung=lambda o, w, s="deu": "", codes_lesen=lesen)
+        return self.np
+
+    def test_strichcode_und_qr_in_felder_rechnung(self):
+        np = self.mit_codes([("CODE-128", "123456789-1234567-7654321"), ("QR-Code", "https://example.org/x")])
+        W.docs[100] = {"id": 100, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                       "original": b"%PDF RECHNUNG code", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.feld(100, "Erkannt: Barcode"), "123456789-1234567-7654321")
+        self.assertEqual(self.feld(100, "Erkannt: QR-Code"), "https://example.org/x")
+        self.assertEqual(self.feld(100, "Erkannt: Rechnungsnummer"), "RE-2026-0815")   # uebrige Felder wie bisher
+
+    def test_strichcode_im_volltext_weg(self):
+        np = self.mit_codes([("CODE-128", "A-1"), ("CODE-128", "B-2"), ("QR-Code", "eins"), ("QR-Code", "zwei")])
+        tt = next(i for i, n in W.tags.items() if n == "totext")
+        W.docs[101] = {"id": 101, "content": "x", "tags": [tt], "custom_fields": [], "owner": None,
+                       "original": b"%PDF BRIEF code", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.feld(101, "Erkannt: Barcode"), "A-1 | B-2")
+        self.assertEqual(self.feld(101, "Erkannt: QR-Code"), "eins\n---\nzwei")
+
+    def test_ohne_code_felder_wird_im_volltext_weg_nicht_gelesen(self):
+        np = self.mit_codes([("CODE-128", "A-1")], felder=())
+        tt = next(i for i, n in W.tags.items() if n == "totext")
+        W.docs[102] = {"id": 102, "content": "x", "tags": [tt], "custom_fields": [], "owner": None,
+                       "original": b"%PDF BRIEF ohne", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual((self.aufrufe, W.docs[102]["custom_fields"]), ([], []))
+
+    def test_girocode_liefert_iban_und_verwendungszweck(self):
+        # das Modell hat die IBAN falsch und den Zweck gar nicht gelesen; der Ueberweisungs-Code geht vor
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e["payment"] = {"iban": "DE89 3704 0044 0532 0130 99", "bic": None, "reference": None}
+        W.extraktion = e
+        np = self.mit_codes([("QR-Code", self.GIRO)], felder=())
+        W.docs[103] = {"id": 103, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                       "original": b"%PDF RECHNUNG giro", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.feld(103, "IBAN"), "DE89370400440532013000")
+        self.assertEqual(self.feld(103, "Erkannt: Verwendungszweck"), "RE-2026-0815 Kunde 4711")
+        _, note = self.note(103)
+        for code in ("IBAN_AUS_QR", "VERWENDUNGSZWECK_AUS_QR", "BETRAG_IM_QR"):
+            self.assertIn(code, note["pruefhinweise"])
+        self.assertEqual(note["pruefstatus"], "ok", note["pruefhinweise"])
+
+    def test_girocode_mit_anderem_betrag_geht_in_die_pruefung(self):
+        np = self.mit_codes([("QR-Code", self.GIRO.replace("EUR1234.56", "EUR999.00"))], felder=())
+        W.docs[104] = {"id": 104, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                       "original": b"%PDF RECHNUNG giro2", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        _, note = self.note(104)
+        self.assertIn("QR_BETRAG_ABWEICHEND", note["pruefhinweise"])
+        self.assertEqual(note["pruefstatus"], "pruefen")
+
+    def test_codes_regeln(self):
+        from nopaper import codes
+        g = codes.girocode(self.GIRO)
+        self.assertEqual((g.iban, g.betrag, g.zweck, g.name),
+                         ("DE89370400440532013000", Decimal("1234.56"), "RE-2026-0815 Kunde 4711",
+                          "Praxis Dr. Beispiel"))
+        self.assertIsNone(codes.girocode("https://example.org"))
+        self.assertIsNone(codes.girocode("BCD\n002\n1\nSCT\n\nName\nkeine iban"))
+        ohne = codes.girocode("BCD\n001\n1\nSCT\nBIC\nName\nDE89 3704 0044 0532 0130 00")
+        self.assertEqual((ohne.iban, ohne.betrag, ohne.zweck), ("DE89370400440532013000", None, ""))
+        # strukturierte Referenz geht dem freien Verwendungszweck vor
+        self.assertEqual(codes.girocode(self.GIRO.replace("\n\n\nRE-", "\n\nRF18539007547034\nRE-")).zweck,
+                         "RF18539007547034")
+        # zwei Ueberweisungs-Codes auf einem Dokument: nicht raten
+        c = [codes.Code("QR-Code", self.GIRO), codes.Code("QR-Code", self.GIRO.replace("0130", "0131"))]
+        self.assertIsNone(codes.erster_girocode(c))
+        self.assertIsNotNone(codes.erster_girocode(c[:1]))
+        self.assertTrue(codes.Code("QR-Code", "x").ist_2d)
+        self.assertFalse(codes.Code("CODE-128", "x").ist_2d)
+        # Ausgabe von zbarimg --xml: Typ und Inhalt, mehrzeiliger Inhalt, doppelte Codes nur einmal
+        xml = ("<barcodes xmlns='http://zbar.sourceforge.net/2008/barcode'><source href='s-1.png'><index num='0'>"
+               "<symbol type='CODE-128' quality='1'><data><![CDATA[123-45]]></data></symbol>"
+               "<symbol type='QR-Code' quality='1'><data><![CDATA[BCD\n002\n1\nSCT]]></data></symbol>"
+               "</index></source><source href='s-2.png'><index num='0'>"
+               "<symbol type='CODE-128' quality='1'><data><![CDATA[123-45]]></data></symbol>"
+               "<symbol type='QR-Code' quality='1'><data format='base64'>SGFsbG8=</data></symbol>"
+               "</index></source></barcodes>")
+        self.assertEqual([(x.typ, x.inhalt) for x in codes.aus_zbar_xml(xml)],
+                         [("CODE-128", "123-45"), ("QR-Code", "BCD\n002\n1\nSCT"), ("QR-Code", "Hallo")])
+        self.assertEqual(codes.aus_zbar_xml("kein xml"), [])
+        # kurzes Textfeld: nur ganze Codes, nie abgeschnitten
+        self.assertEqual(codes.feldtext(["a" * 100, "b" * 50, "c" * 20], 128, " | "), "a" * 100 + " | " + "c" * 20)
+        self.assertEqual(codes.feldtext(["x" * 200], 128, " | "), None)
+        self.assertEqual(codes.feldtext(["x" * 200, "y"], None, "\n"), "x" * 200 + "\ny")
 
     def test_ollama_weg(self):
         self.np.ki.url = "http://127.0.0.1:1"
