@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.4
+
+- **Mehrere Aktenzeichen in einem Dokument** (ändert E70): Stehen mehrere Aktenzeichen mit eigenem Tag im Text, etwa das der Vorinstanz und das des Rechtsmittels, ordnet nopaper alle zu. Bisher wurde in diesem Fall keines zugeordnet. Im Protokoll steht `AKTENZEICHEN_ZUGEORDNET_<Anzahl>`.
+
 ## 1.8.3
 
 - **Aktenzeichen als Tag** (E70): Mit `"aktenzeichen": true` unter `tags` hängt nopaper einem Dokument den vorhandenen Tag an, dessen Name ein Aktenzeichen ist und im Text steht. Gilt im Rechnungs- und im Volltext-Weg, nicht nur für Ladungen.

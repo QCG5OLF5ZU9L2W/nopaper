@@ -301,7 +301,7 @@ In every document it processes, nopaper then searches for the names of existing 
 
 - Spaces, dots and line breaks may differ between text and tag; digits and letters may not.
 - nopaper creates no tag. For a new case the tag must exist in paperless before the document is processed.
-- If several different file numbers with their own tag appear in the text, nopaper assigns none.
+- If several file numbers with their own tag appear in the text, e.g. that of the lower court and that of the appeal, nopaper assigns all of them.
 
 `nopaper check` shows how many file-number tags it finds in paperless.
 

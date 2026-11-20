@@ -748,11 +748,9 @@ class Nopaper:
         bezeichnetes Aktenzeichen im Text, zu dem es keinen Tag gibt, bleibt es beim Hinweis im Protokoll."""
         if not self.cfg.tags_aktenzeichen:
             return [], []
-        ids, mehrdeutig = termin.aktenzeichen_tags(roh + "\n" + text, self.pl.tags(frisch=True))
-        if mehrdeutig:
-            return [], ["AKTENZEICHEN_MEHRDEUTIG"]
+        ids, _ = termin.aktenzeichen_tags(roh + "\n" + text, self.pl.tags(frisch=True))
         if ids:
-            return ids, ["AKTENZEICHEN_ZUGEORDNET"]
+            return ids, [f"AKTENZEICHEN_ZUGEORDNET_{len(ids)}"]
         if termin.aktenzeichen(roh) or termin.aktenzeichen(text):
             return [], ["AKTENZEICHEN_OHNE_TAG"]
         return [], []
