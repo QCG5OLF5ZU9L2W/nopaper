@@ -289,6 +289,21 @@ Detection uses fixed rules, no language model: only a date that stands next to "
 
 The field is a working aid and does not replace deadline control: if text recognition misreads a digit, the wrong day ends up in the field. The summons itself is authoritative.
 
+## GPU: keep models loaded
+
+`install.sh` configures Ollama to keep only one model loaded. That is right for machines without a GPU. On a GPU with enough memory it costs time, because Ollama reloads on every switch between extraction and smoothing. The remedy is a separate file that `install.sh` and updates do not touch:
+
+```bash
+cat > /etc/systemd/system/ollama.service.d/30-gpu.conf <<'EOF'
+[Service]
+Environment="OLLAMA_MAX_LOADED_MODELS=3"
+Environment="OLLAMA_KEEP_ALIVE=30m"
+EOF
+systemctl daemon-reload && systemctl restart ollama
+```
+
+If the models do not fit into memory together, Ollama unloads the least recently used one by itself. `ollama ps` shows what is loaded. To undo: delete the file and run the same two commands.
+
 ## Invoice line items for an inventory system
 
 By default nopaper reads only the header data of an invoice. With

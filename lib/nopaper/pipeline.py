@@ -204,7 +204,12 @@ def glaetten_wenn_noetig(c: Config, ki: llm.Ollama, original: Path, roh: str) ->
     modelle.glaettung = "aus" schaltet die Glaettung ganz ab."""
     if c.modell_glaettung == "aus" or (original.suffix.lower() == ".pdf" and ocr.ist_digital(original)):
         return roh, ["GLAETTUNG_UEBERSPRUNGEN"]
-    return llm.glaetten(ki, c.modell_glaettung or c.modell_text, roh)
+    modell = c.modell_glaettung or c.modell_text
+    # E74: Ein eigenes Glaettungsmodell laeuft mit kleinem Kontext – es braucht dann wenig Grafikspeicher und
+    # kann neben dem Auslese-Modell geladen bleiben. Teilt es sich das Modell mit einer anderen Aufgabe, bleibt
+    # der Kontext gleich, weil Ollama ein Modell bei anderem Kontext neu laedt.
+    eigen = modell not in (c.modell_text, c.modell_bild, extraktions_modell(c))
+    return llm.glaetten(ki, modell, roh, num_ctx=min(llm.GLAETTUNG_KONTEXT, c.num_ctx) if eigen else None)
 
 
 def pruefsumme_passt(paperless_wert, sha256: str, md5: str) -> bool:

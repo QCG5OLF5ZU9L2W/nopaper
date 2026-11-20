@@ -36,13 +36,13 @@ class Ollama:
             raise OllamaNichtErreichbar(type(e).__name__) from e
 
     def chat_json(self, model: str, system: str, user: str, schema: dict,
-                  images: list[str] | None = None) -> dict:
+                  images: list[str] | None = None, num_ctx: int | None = None) -> dict:
         msg = {"role": "user", "content": user}
         if images:
             msg["images"] = images
         payload = {
             "model": model, "stream": False, "format": schema,
-            "options": {"temperature": 0, "num_ctx": self.num_ctx},
+            "options": {"temperature": 0, "num_ctx": num_ctx or self.num_ctx},
             "messages": [{"role": "system", "content": system}, msg],
         }
         if self._think_ok.get(model, True):
@@ -120,6 +120,7 @@ Verboten:
 Behalte Absaetze und Zeilenstruktur bei. Gib nur den korrigierten Text im Feld "text" zurueck."""
 
 ABSCHNITT_ZEICHEN = 2500
+GLAETTUNG_KONTEXT = 4096     # reicht fuer einen Abschnitt samt Antwort; spart Grafikspeicher (E74)
 
 
 def _ziffern(s: str) -> str:
@@ -178,7 +179,7 @@ def _zeilenweise_retten(roh: str, neu: str) -> tuple[str, int]:
     return "\n".join(out), verworfen
 
 
-def glaetten(o: Ollama, model: str, text: str) -> tuple[str, list[str]]:
+def glaetten(o: Ollama, model: str, text: str, num_ctx: int | None = None) -> tuple[str, list[str]]:
     """Glaettet abschnittsweise. Aendert das Modell Ziffern, werden nur die betroffenen Zeilen roh gelassen."""
     out, verworfen, teilweise = [], 0, 0
     teile = _abschnitte(text)
@@ -187,7 +188,7 @@ def glaetten(o: Ollama, model: str, text: str) -> tuple[str, list[str]]:
             out.append(teil)
             continue
         try:
-            neu = o.chat_json(model, GLAETTUNG_PROMPT, teil, GLAETTUNG_SCHEMA).get("text", "")
+            neu = o.chat_json(model, GLAETTUNG_PROMPT, teil, GLAETTUNG_SCHEMA, num_ctx=num_ctx).get("text", "")
         except (json.JSONDecodeError, ValueError):
             neu = ""
         grund = pruefe_glaettung(teil, neu) if neu.strip() else "LEER"

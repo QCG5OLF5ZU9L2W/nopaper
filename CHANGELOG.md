@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.2
+
+- **Weniger Umladen der Modelle auf einer Grafikkarte** (E74): Ein eigenes Glättungsmodell (`modelle.glaettung`) läuft jetzt mit kleinem Kontext (4.096 Token) statt mit `modelle.kontext`. Es braucht dadurch deutlich weniger Grafikspeicher und kann neben dem Auslese-Modell geladen bleiben.
+- Dazu gehört eine Einstellung an Ollama, die nopaper nicht selbst setzt: mehrere Modelle gleichzeitig geladen lassen (README, Abschnitt „Grafikkarte: Modelle geladen lassen“). Ohne sie lädt Ollama bei jedem Wechsel neu.
+
 ## 1.9.1
 
 - **Lastschrift** (E73): Eine Mandatsreferenz oder Gläubiger-ID landet nicht mehr im Verwendungszweck (`VERWENDUNGSZWECK_IST_MANDAT`). Sagt der Beleg, dass der Betrag abgebucht oder eingezogen wird, steht `ZAHLUNG_PER_LASTSCHRIFT` in den Hinweisen und im Sidecar die Zahlungsart Lastschrift (Code 59 statt 58). Anlass: Telefonrechnung, bei der die Mandatsreferenz als Verwendungszweck im Feld stand.
