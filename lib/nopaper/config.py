@@ -81,6 +81,7 @@ class Config:
     kategorie_tags: dict[str, list[str]] = field(default_factory=dict)
     tag_text: str = ""
     tag_zu_buchen: str = ""
+    tags_aktenzeichen: bool = False        # E70: vorhandene Aktenzeichen-Tags zuordnen
     kumero_url: str = ""
     kumero_mandant: str = ""
     kumero_token_datei: str = ""
@@ -156,6 +157,8 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         raise ConfigError(f"paperless.ca_datei {ca} nicht gefunden")
 
     tags = _req(d, "tags")
+    if not isinstance(tags.get("aktenzeichen", False), bool):
+        raise ConfigError("tags.aktenzeichen muss true oder false sein")
     felder = _req(d, "felder")
     if not isinstance(felder, dict):
         raise ConfigError("felder muss ein Objekt sein")
@@ -198,6 +201,7 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         tag_ausloeser=str(_req(d, "tags.ausloeser_nachbearbeitung")).strip(),
         tag_text=str(tags.get("ausloeser_text") or "").strip(),
         tag_zu_buchen=str(tags.get("zu_buchen") or "").strip(),
+        tags_aktenzeichen=tags.get("aktenzeichen", False),
         felder={k: v.strip() for k, v in felder.items()},
         empfaenger=str(_req(d, "empfaenger")).strip(),
         modell_text=str(_req(d, "modelle.text")),

@@ -84,6 +84,13 @@ class Paperless:
     def id_von(self, endpoint: str, name: str, key: str = "name") -> int | None:
         return self._ids(endpoint, key).get(name.lower())
 
+    def tags(self, frisch: bool = False) -> dict[str, int]:
+        """Alle Tags: Name (klein geschrieben) -> ID. `frisch` fragt paperless neu, damit ein eben
+        angelegter Tag ohne Neustart gefunden wird."""
+        if frisch:
+            self._cache.pop("tags", None)
+        return dict(self._ids("tags"))
+
     def tag_ids(self, namen: list[str]) -> list[int]:
         ids, fehlt = [], []
         for n in namen:

@@ -179,6 +179,10 @@ def main(argv=None) -> int:
                 else:
                     print(f"ok   Sidecar-Feld '{cfg.felder['sidecar']}' (Datentyp {typ or 'unbekannt'})")
             print(f"     offene Nachbearbeitungen: {len(np.pl.mit_tag(np.tag_ausloeser))}")
+            if cfg.tags_aktenzeichen:
+                from . import termin
+                n = sum(1 for name in np.pl.tags() if termin.ist_aktenzeichen(name))
+                print(f"     Aktenzeichen-Tags in paperless: {n}")
             if np.tag_text:
                 print(f"     offene Text-Erneuerungen: {len(np.pl.mit_tag(np.tag_text))}")
         except PaperlessFehler as e:
