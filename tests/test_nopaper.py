@@ -1000,6 +1000,13 @@ class NopaperTest(unittest.TestCase):
         np.nachbearbeitung_abfragen()
         self.assertEqual(self.tagnamen(89), {"Scan"})
 
+    def test_fehlerantwort_nur_feldnamen(self):
+        from nopaper.paperless import _fehlerschluessel
+        antwort = json.dumps({"custom_fields": [{}, {"non_field_errors": ["Wert 'Muster 11:00 Uhr' ungueltig"]}],
+                              "Muster GmbH": ["x"]}).encode()
+        self.assertEqual(_fehlerschluessel(antwort), "custom_fields,non_field_errors")
+        self.assertEqual(_fehlerschluessel(b"<html>"), "")
+
     def test_beleg_ohne_lesbaren_betrag_geht_in_die_pruefung(self):
         # sieht nach Rechnung aus, aber der Betrag wurde nicht gelesen: Volltext-Weg MIT Pruef-Tag
         e = copy.deepcopy(LLM_RECHNUNG)

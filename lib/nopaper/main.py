@@ -178,6 +178,13 @@ def main(argv=None) -> int:
                           "Werte. Der Sidecar braucht ein Feld fuer langen Text.")
                 else:
                     print(f"ok   Sidecar-Feld '{cfg.felder['sidecar']}' (Datentyp {typ or 'unbekannt'})")
+            for key, (_, typ) in np.felder.items():
+                soll = FELD_TYPEN[key]
+                passt = typ == soll or not typ or (soll in ("string", "longtext") and typ in ("string", "longtext"))
+                if not passt:
+                    ok = False
+                    print(f"FEHL Feld '{cfg.felder[key]}' hat in paperless den Datentyp '{typ}', nopaper schreibt "
+                          f"dort '{soll}' – paperless lehnt den Wert ab. Feld mit dem richtigen Datentyp neu anlegen.")
             print(f"     offene Nachbearbeitungen: {len(np.pl.mit_tag(np.tag_ausloeser))}")
             if cfg.tags_aktenzeichen:
                 from . import termin

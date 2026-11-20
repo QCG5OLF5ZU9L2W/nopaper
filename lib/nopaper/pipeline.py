@@ -806,7 +806,9 @@ class Nopaper:
                     except Exception:
                         pass
                     self.state.nach_loeschen(doc_id)
-                    log.error("nachbearbeitung doc=%s endgueltig fehlgeschlagen (%s)", doc_id, code)
+                    detail = getattr(e, "detail", "") if str(code) == "PAPERLESS_HTTP_400" else ""
+                    log.error("nachbearbeitung doc=%s endgueltig fehlgeschlagen (%s%s)", doc_id, code,
+                              f" beanstandet: {detail}" if detail else "")
                 else:
                     self.state.nach_setzen(doc_id, v, self._backoff(v), code)
                     log.warning("nachbearbeitung doc=%s Versuch %s fehlgeschlagen (%s)", doc_id, v, code)

@@ -8,7 +8,7 @@ This file records **what** is being built and **which decisions have already bee
 Anyone working on this project (human or coding agent) follows it. Deviations only after
 consulting the project owner (who is also the data protection officer).
 
-As of: 2026-11-20 (version 1.8.5; learning from bookings per E37, E39 not built yet; E40–E44 built in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9; E54 built in 1.4.10, E56 in 1.5.0, E57 in 1.5.2, E58 to E60 in 1.5.3, E61 in 1.6.0, E62 in 1.7.0, E63 in 1.7.1, E64 in 1.7.2, E65 in 1.7.3, E66 in 1.7.4, E67 in 1.8.0, E69 in 1.8.2; E68 (return path for learning) postponed; E51–E53, E55 decided, not built yet)
+As of: 2026-11-20 (version 1.8.6; learning from bookings per E37, E39 not built yet; E40–E44 built in 1.4.1, E45 in 1.4.2/1.4.3, E46 in 1.4.4, E47 in 1.4.5, E48 in 1.4.6/1.4.7, E49 in 1.4.8, E50 in 1.4.9; E54 built in 1.4.10, E56 in 1.5.0, E57 in 1.5.2, E58 to E60 in 1.5.3, E61 in 1.6.0, E62 in 1.7.0, E63 in 1.7.1, E64 in 1.7.2, E65 in 1.7.3, E66 in 1.7.4, E67 in 1.8.0, E69 in 1.8.2; E68 (return path for learning) postponed; E51–E53, E55 decided, not built yet)
 
 ---
 
@@ -331,7 +331,7 @@ Result: NuExtract in image mode is on a par with qwen, and probably better with 
     j. **Negative amounts** (E60): whether paperless and kumero accept them in the fields has not been confirmed on the real system.
     k. **Assigning scanned letters to patients** – a separate undertaking outside nopaper; open are the practice software, access to the patient master data and the filing path.
 
-## 13. Code layout (version 1.8.5)
+## 13. Code layout (version 1.8.6)
 
 | File | Content |
 |---|---|
