@@ -217,7 +217,7 @@ def main(argv=None) -> int:
         rc = 0
         for i in args.ids:
             try:
-                print(i, np.nachbearbeiten(i))
+                print(i, np.nachbearbeiten(i, erzwingen=True))   # von Hand: der Mensch hat entschieden
             except (PaperlessFehler, Voruebergehend, llm.OllamaNichtErreichbar) as e:
                 print(i, "FEHLER", getattr(e, "code", e))
                 rc = 1

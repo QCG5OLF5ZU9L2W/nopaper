@@ -255,7 +255,7 @@ Grenzen: Die Betriebsart ist bisher nur in den Offline-Tests gelaufen. Die Gegen
 | Weg | Auslöser | Was nopaper tut |
 |---|---|---|
 | Scanner | PDF in `eingang/rechnungen` oder `eingang/dokumente` | einordnen, auslesen, an paperless übergeben, Felder, Titel, Sidecar |
-| Nachbearbeitung | Tag aus `tags.ausloeser_nachbearbeitung` am Dokument | als Rechnung auslesen, Felder, Titel, Tags, Sidecar; Tag entfernen |
+| Nachbearbeitung | Tag aus `tags.ausloeser_nachbearbeitung` am Dokument | als Rechnung auslesen, Felder, Titel, Tags, Sidecar; Tag entfernen. Ist es keine Rechnung: nur Tag entfernen und Prüf-Tag setzen |
 | Volltext | Tag aus `tags.ausloeser_text` am Dokument | Text neu erkennen und glätten, nur den Volltext ersetzen; Tag entfernen |
 
 Der Volltext wird nur ersetzt, wenn der neue Text nicht schlechter ist als der vorhandene.

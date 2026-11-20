@@ -1003,6 +1003,52 @@ class NopaperTest(unittest.TestCase):
         with self.assertRaisesRegex(config.ConfigError, "Pflichtangabe fehlt: eingang"):
             laden(eingang=None)                                                 # Scanner-Betrieb braucht die Ordner
 
+    def test_ausloeser_an_einem_brief_setzt_pruef_tag_und_macht_weiter(self):
+        # E63: ein Dokument mit Rechnungs-Ausloeser, das keine Rechnung ist, wird nicht zur Rechnung erklaert
+        W.einordnung = "brief"
+        W.docs[90] = {"id": 90, "content": "alt", "tags": [3, 5], "custom_fields": [{"field": 99, "value": "x"}],
+                      "owner": None, "original": b"%PDF BRIEF kein beleg", "archive": b"A"}
+        self.assertEqual(self.np.nachbearbeitung_abfragen(), 1)
+        self.assertEqual(self.tagnamen(90), {"Scan", "nopaper prüfen"})      # Ausloeser weg, Pruef-Tag dran
+        self.assertEqual(W.patches, [(90, ["tags"])])                         # sonst nichts geschrieben
+        self.assertEqual((W.docs[90]["content"], W.docs[90]["custom_fields"]), ("alt", [{"field": 99, "value": "x"}]))
+        self.assertFalse(list((self.tmp / "aus").glob("*.xml")))              # kein Sidecar
+        self.assertFalse([c for c in W.llm_calls if c[1].startswith("Du korrigierst")])   # keine Glaettung
+        # das naechste Dokument laeuft normal weiter
+        W.einordnung = "rechnung"
+        W.docs[91] = {"id": 91, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG danach", "archive": b"A"}
+        self.np.nachbearbeitung_abfragen()
+        self.assertIn("Rechnung", self.tagnamen(91))
+
+    def test_von_hand_erzwungen_bleibt_moeglich(self):
+        W.einordnung = "brief"
+        W.docs[92] = {"id": 92, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG von hand", "archive": b"A"}
+        self.np.nachbearbeiten(92, erzwingen=True)
+        self.assertIn("Rechnung", self.tagnamen(92))
+        _, note = self.note(92)
+        self.assertIn("EINORDNUNG_UEBERSTIMMT", note["pruefhinweise"])
+
+    def test_abgelehnte_anfrage_wird_nicht_fuenfmal_wiederholt(self):
+        # paperless lehnt den Schreibvorgang ab (HTTP 400): sofort Ausloeser weg und Pruef-Tag, kein Warten
+        from nopaper.paperless import PaperlessFehler
+        echt, aufrufe = self.np.pl.aendern, []
+
+        def aendern(doc_id, daten):
+            aufrufe.append(sorted(daten))
+            if "custom_fields" in daten:
+                raise PaperlessFehler("PAPERLESS_HTTP_400", "/api/documents/93/")
+            return echt(doc_id, daten)
+        self.np.pl.aendern = aendern
+        W.docs[93] = {"id": 93, "content": "alt", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG abgelehnt", "archive": b"A"}
+        self.np.nachbearbeitung_abfragen()
+        self.assertEqual(self.tagnamen(93), {"nopaper prüfen"})
+        self.assertEqual(W.docs[93]["content"], "alt")
+        self.assertIsNone(self.np.state.nach(93))                             # kein weiterer Versuch vorgemerkt
+        self.assertEqual(aufrufe[-1], ["tags"])
+
     def test_ollama_weg(self):
         self.np.ki.url = "http://127.0.0.1:1"
         self.scan("rechnungen", "r.pdf", b"%PDF RECHNUNG 9")

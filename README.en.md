@@ -257,7 +257,7 @@ Limits: so far this mode has only run in the offline tests. The cross-check betw
 | Path | Trigger | What nopaper does |
 |---|---|---|
 | Scanner | PDF in `eingang/rechnungen` or `eingang/dokumente` | classify, read, hand over to paperless, fields, title, sidecar |
-| Post-processing | tag from `tags.ausloeser_nachbearbeitung` on the document | read as invoice, fields, title, tags, sidecar; remove the tag |
+| Post-processing | tag from `tags.ausloeser_nachbearbeitung` on the document | read as invoice, fields, title, tags, sidecar; remove the tag. If it is not an invoice: only remove the tag and set the review tag |
 | Full text | tag from `tags.ausloeser_text` on the document | recognise and clean up the text again, replace the full text only; remove the tag |
 
 The full text is replaced only if the new text is not worse than the existing one.

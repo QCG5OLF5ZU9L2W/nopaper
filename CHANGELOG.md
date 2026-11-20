@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.7.1
+
+- **Der Rechnungs-Auslöser erzwingt keine Rechnung mehr** (E63): Ist ein Dokument mit dem Tag aus `tags.ausloeser_nachbearbeitung` laut Modell keine Rechnung, entfernt nopaper den Auslöser, setzt den Prüf-Tag und macht mit dem nächsten Dokument weiter. Sonst wird nichts geschrieben. Von Hand erzwingen lässt es sich weiterhin mit `nopaper nachbearbeiten <id>`.
+- **Abgelehnte Schreibvorgänge werden nicht mehr fünfmal wiederholt:** Lehnt paperless eine Anfrage ab (HTTP 4xx), oder hat ein Dokument keinen erkennbaren Text oder ein nicht unterstütztes Format, wird sofort der Auslöser entfernt und der Prüf-Tag gesetzt.
+
 ## 1.7.0
 
 - **Termin aus einer Ladung** (Entscheidung E62): Im Volltext-Weg (Tag aus `tags.ausloeser_text`) erkennt nopaper eine gerichtliche Ladung und schreibt den Verhandlungstermin in benutzerdefinierte Felder: `felder.termin` (Datum), `felder.terminzeit` (Uhrzeit und Saal), `felder.aktenzeichen`. Jedes Feld ist optional.

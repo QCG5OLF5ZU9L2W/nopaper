@@ -29,6 +29,13 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
                  "BEFREIUNGSGRUND_ERSETZT", "STEUERNUMMER_VERWORFEN", "RECHNUNGSNUMMER_VERWORFEN", "RUECKGELD_ERKANNT", "VERWENDUNGSZWECK_VERWORFEN", "VERWENDUNGSZWECK_AUS_TEXT", "RECHNUNGSNUMMER_ABWEICHEND", "ZAHLUNG_AUS_TEXT", "FAELLIGKEIT_BERECHNET", "SKONTO_VERWORFEN", "ZWEITE_LESUNG", "GLAETTUNG_UEBERSPRUNGEN",
                  "VERSICHERUNGSTEUER_KORRIGIERT"}
 TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
+# Fehler, die ein neuer Versuch nicht behebt: sofort Ausloeser entfernen und Pruef-Tag setzen
+ENDGUELTIG = ("FORMAT_NICHT_UNTERSTUETZT", "KEIN_OCR_TEXT")
+
+
+def _endgueltig(code: str) -> bool:
+    # paperless lehnt die Anfrage ab (400, 413, 422 ...): derselbe Inhalt wird wieder abgelehnt
+    return code in ENDGUELTIG or (code.startswith("PAPERLESS_HTTP_4") and code != "PAPERLESS_HTTP_408")
 SIDECAR_HINWEIS = ("Maschinell aus Papierbeleg extrahiert. Keine E-Rechnung im Sinne von § 14 UStG; "
                    "massgeblich ist der Originalbeleg mit dem angegebenen SHA-256.")
 
@@ -455,7 +462,10 @@ class Nopaper:
         return art
 
     # ------------------------------------------------------------------ Weg 2: Nachbearbeitung
-    def nachbearbeiten(self, doc_id: int) -> str:
+    def nachbearbeiten(self, doc_id: int, erzwingen: bool = False) -> str:
+        """Dokument mit Rechnungs-Ausloeser als Rechnung auslesen. Ordnet das Modell es nicht als Rechnung
+        ein, wird nichts erfunden: Ausloeser weg, Pruef-Tag dran, weiter (KEINE_RECHNUNG, E63).
+        `erzwingen` (nur `nopaper nachbearbeiten <id>` von Hand): trotzdem als Rechnung behandeln."""
         self.ids_laden()
         c = self.cfg
         t0 = time.monotonic()
@@ -472,9 +482,17 @@ class Nopaper:
             roh = self.ocr_text(original, workdir, c.ocr_sprache)
             if not roh.strip():
                 raise PaperlessFehler("KEIN_OCR_TEXT")
+            inv, issues, notes, methode, modell = self._rechnung_auslesen(
+                original, roh, workdir, kategorie="rechnung" if erzwingen else None)
+            if not invoice.ist_rechnungsartig(inv["kategorie"]):
+                # kein Beleg: nichts schreiben ausser den Tags, damit ein Mensch entscheidet
+                tags = (set(doc.get("tags") or []) - {self.tag_ausloeser}) | (
+                    {self.tag_pruefen} if self.tag_pruefen else set())
+                self.pl.aendern(doc_id, {"tags": sorted(tags)})
+                log.info("nachbearbeitung doc=%s KEINE_RECHNUNG kategorie=%s dauer=%.0fs", doc_id,
+                         inv["kategorie"] or "-", time.monotonic() - t0)
+                return "keine_rechnung"
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
-            inv, issues, notes, methode, modell = self._rechnung_auslesen(original, roh, workdir,
-                                                                          kategorie="rechnung")
             prev = self._duplikat(inv, doc_id)
             if prev is not None:
                 issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
@@ -632,7 +650,7 @@ class Nopaper:
             except Exception as e:
                 code = getattr(e, "code", None) or type(e).__name__
                 v = versuche + 1
-                if v >= self.cfg.max_versuche:
+                if v >= self.cfg.max_versuche or _endgueltig(str(code)):
                     # Ausloeser entfernen, Pruef-Tag setzen, damit es nicht endlos wiederholt wird
                     try:
                         doc = self.pl.dokument(doc_id)
