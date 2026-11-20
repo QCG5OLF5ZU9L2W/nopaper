@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.1
+
+- **Duplikatsuche in der Betriebsart „erst paperless“ repariert:** paperless lehnte die Feldabfrage mit HTTP 400 ab, weil es den verwendeten Operator nicht kennt; die Duplikatsuche fiel dadurch aus. nopaper fragt jetzt nur noch ein Feld mit einem Operator ab, den paperless dokumentiert, und vergleicht Rechnungsnummer und Rechnungssteller selbst genau.
+
 ## 1.8.0
 
 - **Strichcodes und QR-Codes** (E67): nopaper liest die Codes der ersten drei Seiten mit `zbarimg` (Paket `zbar-tools`, wird von `install.sh` mitinstalliert), ohne Sprachmodell.

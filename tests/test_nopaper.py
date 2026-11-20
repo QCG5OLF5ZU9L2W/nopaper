@@ -191,13 +191,16 @@ class Handler(BaseHTTPRequestHandler):
             if W.feldabfrage != "ok":
                 return self._send({"detail": "unbekannter Filter"}, code=400)
             abfrage = json.loads(q["custom_field_query"])
-            teile = abfrage[1] if abfrage[0] == "AND" else [abfrage]
+            # wie das echte paperless: nur [Feld, Operator, Wert] mit einem bekannten Operator, sonst HTTP 400
+            if len(abfrage) != 3 or abfrage[1] not in ("exact", "icontains", "istartswith", "iendswith"):
+                return self._send({"custom_field_query": ["Invalid custom field query expression"]}, code=400)
+            fid, op, wert = abfrage
 
             def passt(d):
-                werte = {f["field"]: f.get("value") for f in d.get("custom_fields") or []}
-                return all(op == "iexact" and str(werte.get(fid, "")).lower() == str(wert).lower()
-                           for fid, op, wert in teile)
-            return self._send({"next": None, "results": [{"id": i} for i, d in sorted(W.docs.items()) if passt(d)]})
+                v = str({f["field"]: f.get("value") for f in d.get("custom_fields") or []}.get(fid, ""))
+                return v == str(wert) if op == "exact" else str(wert).lower() in v.lower()
+            return self._send({"next": None, "results": [{"id": i, "custom_fields": d["custom_fields"]}
+                                                         for i, d in sorted(W.docs.items()) if passt(d)]})
         if u.path == "/api/documents/":
             tid = int(q["tags__id__all"])
             return self._send({"next": None, "results": [{"id": i} for i, d in sorted(W.docs.items())
@@ -852,8 +855,17 @@ class NopaperTest(unittest.TestCase):
                                         {"field": st, "value": "Praxis Dr. Beispiel"}]}
         W.docs[71] = {"id": 71, "content": "", "tags": [5], "custom_fields": [], "owner": None,
                       "original": b"%PDF RECHNUNG dup", "archive": b"A"}
+        # gleiche Nummer als Teil einer laengeren Nummer bzw. bei anderem Absender ist KEIN Duplikat
+        W.docs[41] = {"id": 41, "content": "", "tags": [1], "owner": None, "original": b"x", "archive": b"A",
+                      "custom_fields": [{"field": nr, "value": "RE-2026-08150"},
+                                        {"field": st, "value": "Praxis Dr. Beispiel"}]}
+        W.docs[42] = {"id": 42, "content": "", "tags": [1], "owner": None, "original": b"x", "archive": b"A",
+                      "custom_fields": [{"field": nr, "value": "RE-2026-0815"},
+                                        {"field": st, "value": "Andere Firma GmbH"}]}
         np.ein_durchlauf()
         self.assertIn("DUPLIKAT_VON_DOKUMENT_40", self.feld(71, "Erkannt: Sidecar"))
+        self.assertNotIn("DOKUMENT_41", self.feld(71, "Erkannt: Sidecar"))
+        self.assertNotIn("DOKUMENT_42", self.feld(71, "Erkannt: Sidecar"))
         self.assertIn("nopaper prüfen", self.tagnamen(71))
         # ein zweiter Lauf ueber dasselbe Dokument haelt es nicht fuer sein eigenes Duplikat
         W.docs[40]["tags"] = [5]
