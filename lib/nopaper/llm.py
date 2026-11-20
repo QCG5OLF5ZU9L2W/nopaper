@@ -313,7 +313,8 @@ Betraege mit dem gedruckten Vorzeichen: steht ein Minus davor oder dahinter (Aus
 groesser als der Einkauf, "zu zahlen -0,77"), sind gross_total, net_total, tax_total und vat_breakdown negativ.
 gross_total = Endbetrag/Rechnungsbetrag, nicht Zwischensumme. net_total und tax_total sind Summen ueber alle
 Steuersaetze; jeder Steuersatz zusaetzlich als Zeile in vat_breakdown. Steuerfrei: rate 0 und Befreiungshinweis.
-Versicherungsteuer ist keine Umsatzsteuer: tax_total 0, rate 0. prepaid = bereits bezahlt (bar, Karte, PayPal),
+Versicherungsteuer ist keine Umsatzsteuer: tax_total 0, rate 0. Porto, Versand und Gebuehren sind keine Steuer:
+weist der Beleg keine Umsatzsteuer aus, ist tax_total 0 und net_total = gross_total. prepaid = bereits bezahlt (bar, Karte, PayPal),
 hoechstens der Endbetrag; bei "gegeben"/"Rueckgeld" ist amount_due 0.
 payment.reference = was bei der Ueberweisung als Verwendungszweck anzugeben ist (Kassenzeichen, Aktenzeichen,
 Vertrags-, Kunden- oder Rechnungsnummer laut Zahlungshinweis), genau wie gedruckt.

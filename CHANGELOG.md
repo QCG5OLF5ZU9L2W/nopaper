@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.7.3
+
+- **Steuer nur, wenn der Beleg sie ausweist** (E65): Liefert das Modell einen Steuerbetrag, auf dem Beleg steht aber weder ein Prozentsatz noch ein Steuerwort (oder nur ein Befreiungshinweis), und der rechnerische Satz ist weder 7 noch 19 %, setzt nopaper Steuer 0 und Netto = Brutto (`STEUER_NICHT_AUSGEWIESEN`). Eine vom Modell gelieferte, in sich stimmige Steuerzeile zu 7 oder 19 % bleibt unangetastet. Anlass: Porto wurde als Steuer gelesen.
+- Beide Prompts stellen klar, dass Porto, Versand und Gebühren keine Steuer sind. Musterbelege neu messen.
+
 ## 1.7.2
 
 - **Von Hand eingetragene Rechnungsnummer** (E64): Steht auf einem Scan eine Bezeichnung wie „RE-Nr.“ und hat die erste Lesung keine Nummer gefunden, fragt nopaper das Bildmodell. Liest nur dieses eine Nummer, kommt sie ins Feld und der Beleg in die Prüfung. Lesen NuExtract und das Rückfall-Bildmodell dieselbe Nummer, gilt sie als belegt.

@@ -1192,6 +1192,50 @@ class RegelTest(unittest.TestCase):
         i.update(k)
         return i
 
+    def test_steuer_nicht_ausgewiesen(self):
+        # E65: Beleg ohne Umsatzsteuer, das Modell hat das Porto als Steuer gelesen (Netto 25,00 + "Steuer" 1,01)
+        text = ("Praxis Dr. Beispiel  Steuernummer 12/345/67890  Finanzamt Musterstadt\n"
+                "Musterbericht (25,00 €)  25,00 €\nPortogebühren  1,01 €\nSumme  26,01 €\n")
+
+        def lauf(text, net=25.0, tax=1.01, gross=26.01):
+            raw = {"totals": {"net_total": net, "tax_total": tax, "gross_total": gross, "prepaid": None,
+                              "amount_due": None}, "vat_breakdown": []}
+            i = self.inv(raw=raw)
+            return i, invoice.complete_vat(i, text)
+        i, notes = lauf(text)
+        self.assertIn("STEUER_NICHT_AUSGEWIESEN", notes)
+        self.assertEqual((i["net"], i["tax"], i["gross"]), (Decimal("26.01"), Decimal("0"), Decimal("26.01")))
+        self.assertEqual([r["rate"] for r in i["vat"]], [Decimal("0")])
+        # Befreiungshinweis auf dem Beleg: ebenfalls keine Steuer
+        i, notes = lauf(text + "Umsatzsteuerfrei nach § 4 Nr. 14 UStG\n")
+        self.assertIn("STEUER_NICHT_AUSGEWIESEN", notes)
+        # der Beleg weist Steuer aus (Prozentsatz bzw. Steuerwort): nichts anfassen
+        for mit in ("zzgl. 19 % 4,75\n", "MwSt 1,01\n", "Netto 25,00 Brutto 26,01\n"):
+            i, notes = lauf(text + mit)
+            self.assertNotIn("STEUER_NICHT_AUSGEWIESEN", notes, mit)
+            self.assertEqual(i["tax"], Decimal("1.01"), mit)
+        # kein Steuerwort lesbar, aber der Satz ist genau 19 %: die Texterkennung kann das Wort verloren haben
+        i, notes = lauf("Leistung 100,00\nSumme 119,00\n", net=100.0, tax=19.0, gross=119.0)
+        self.assertNotIn("STEUER_NICHT_AUSGEWIESEN", notes)
+        self.assertEqual(i["tax"], Decimal("19"))
+        # das Modell liefert vom Bild eine stimmige Zeile zu 19 %: bleibt, auch wenn der Text kein Steuerwort hat
+        raw = {"totals": {"net_total": 25.0, "tax_total": 4.75, "gross_total": 29.75, "prepaid": None,
+                          "amount_due": None},
+               "vat_breakdown": [{"rate": 19, "basis": 25.0, "tax": 4.75, "exemption_reason": None}]}
+        i = self.inv(raw=raw)
+        self.assertNotIn("STEUER_NICHT_AUSGEWIESEN", invoice.complete_vat(i, "Leistung 25,00\nSumme 29,75\n"))
+        # eine "Zeile" zu einem Satz, den es nicht gibt (Porto als 4 % gelesen), ist kein Beleg
+        raw["totals"].update(tax_total=1.01, gross_total=26.01)
+        raw["vat_breakdown"] = [{"rate": 4.04, "basis": 25.0, "tax": 1.01, "exemption_reason": None}]
+        i = self.inv(raw=raw)
+        self.assertIn("STEUER_NICHT_AUSGEWIESEN", invoice.complete_vat(i, text))
+        self.assertEqual((i["net"], i["tax"]), (Decimal("26.01"), Decimal("0")))
+        # die Hilfsfunktion: Steuernummer, USt-IdNr. und Finanzamt sind kein Ausweis von Steuer
+        self.assertFalse(invoice.steuer_ausgewiesen("Steuernummer 12/345/67890 USt-IdNr. DE123456789 Finanzamt X"))
+        self.assertFalse(invoice.steuer_ausgewiesen("Die Leistung ist umsatzsteuerfrei (§ 4 Nr. 14 UStG)."))
+        self.assertTrue(invoice.steuer_ausgewiesen("Hust. 13% 7,06 1,34"))
+        self.assertTrue(invoice.steuer_ausgewiesen("enthaltene Umsatzsteuer 4,56"))
+
     def test_summen_aus_aufschluesselung(self):
         # Fall aus einem Testlauf, Bewirtungsbeleg: Modell setzte Netto=47,66 (7%-Zeile) und Steuer=14,29 (19%-Netto)
         raw = {"totals": {"net_total": 47.66, "tax_total": 14.29, "gross_total": 68.0, "prepaid": None,
