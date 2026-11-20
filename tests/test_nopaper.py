@@ -246,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self._body())
         doc = W.docs[int(self.path.rstrip("/").split("/")[3])]
         W.patches.append((doc["id"], sorted(body)))
-        doc.update({k: v for k, v in body.items() if k in ("content", "tags", "custom_fields", "owner", "title")})
+        doc.update({k: v for k, v in body.items() if k in ("content", "tags", "custom_fields", "owner", "title", "created")})
         self._send({"id": doc["id"]})
 
     def _ollama(self, req):
@@ -792,10 +792,11 @@ class NopaperTest(unittest.TestCase):
         d = json.loads((self.tmp / "config.json").read_text())
         d["betriebsart"] = "paperless"
         d["felder"]["sidecar"] = "Erkannt: Sidecar"
-        d.pop("eingang"), d.pop("ausgang")          # Ordner sind in dieser Betriebsart keine Pflicht
+        d.pop("eingang", None), d.pop("ausgang", None)   # Ordner sind in dieser Betriebsart keine Pflicht
         d.update(extra)
         (self.tmp / "config.json").write_text(json.dumps(d))
-        self.np.state.db.close()
+        if hasattr(self.np.state, "db"):
+            self.np.state.db.close()
         for alt in ("arbeit", "aus", "fehler", "zustand"):      # Reste der Scanner-Instanz aus setUp
             shutil.rmtree(self.tmp / alt, ignore_errors=True)
         self.cfg = config.load(self.tmp / "config.json")
@@ -825,7 +826,10 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(note["sha256-original"], hashlib.sha256(b"%PDF RECHNUNG pz").hexdigest())
         self.assertEqual(note["pruefstatus"], "ok", note.get("pruefhinweise"))
         # alles in EINEM Aufruf: Volltext, Tags, Felder (mit Sidecar) und Titel
-        self.assertEqual(W.patches, [(70, ["content", "custom_fields", "tags", "title"])])
+        self.assertEqual(W.patches[0], (70, ["content", "custom_fields", "tags", "title"]))
+        # danach, getrennt und nicht kritisch: das Dokumentdatum in paperless = Rechnungsdatum
+        self.assertEqual(W.patches[1:], [(70, ["created"])])
+        self.assertEqual(W.docs[70]["created"], "2026-11-03")
         # nopaper haelt nichts: keine Datenbank, kein Ausgang, kein Fehlerordner, Arbeitsverzeichnis leer
         self.assertEqual(sorted(p.name for p in self.tmp.iterdir() if p.is_dir()), ["arbeit", "ein"])
         self.assertEqual(list((self.tmp / "arbeit").iterdir()), [])
@@ -1113,6 +1117,92 @@ class NopaperTest(unittest.TestCase):
             self.assertTrue(b(t), t)
         for t in ("Kunden-Nr. 4711", "St.-Nr. 12/345/67890", "Tel.-Nr. 030 1234", "Rechnung vom 03.11.2026"):
             self.assertFalse(b(t), t)
+
+    def test_dokumentdatum_nur_bei_gesichertem_datum(self):
+        np = self.paperless_zuerst()
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e["issue_date"] = "2026-10-09"                        # steht nicht im Text -> DATUM_NICHT_IM_TEXT
+        W.extraktion = e
+        W.docs[96] = {"id": 96, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG datum", "archive": b"A", "created": "1983-08-25"}
+        np.ein_durchlauf()
+        self.assertEqual(W.docs[96]["created"], "1983-08-25")  # unsicheres Datum: paperless-Datum bleibt
+        self.assertNotIn((96, ["created"]), W.patches)
+
+    def test_dokumentdatum_abschaltbar_und_fehler_haelt_nicht_auf(self):
+        from nopaper.paperless import PaperlessFehler
+        np = self.paperless_zuerst(dokumentdatum_setzen=False)
+        W.docs[97] = {"id": 97, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG aus", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(W.patches, [(97, ["content", "custom_fields", "tags", "title"])])
+        del W.docs[97]                                    # sonst gaelte das naechste als Duplikat
+        np = self.paperless_zuerst(dokumentdatum_setzen=True)
+        echt = np.pl.aendern
+
+        def aendern(doc_id, daten):
+            if "created" in daten:
+                raise PaperlessFehler("PAPERLESS_HTTP_400", "/api/documents/98/")
+            return echt(doc_id, daten)
+        np.pl.aendern = aendern
+        W.docs[98] = {"id": 98, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG zwei", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(self.tagnamen(98), {"Rechnung", "Eingangsrechnung"})   # Beleg trotzdem fertig, kein Pruef-Tag
+        self.assertIsNone(np.state.nach(98))
+
+    def test_geburtsdatum_ist_kein_rechnungsdatum(self):
+        g = invoice.datum_ist_geburtsdatum
+        import datetime
+        d = datetime.date(1983, 8, 25)
+        self.assertTrue(g(d, "Patient: Muster, Max geb. 25.08.1983\nBerlin, d. ............"))
+        self.assertTrue(g(d, "Geburtsdatum: 25.08.1983"))
+        self.assertTrue(g(d, "Max Muster, geboren am 25.08.1983 in Musterstadt"))
+        self.assertTrue(g(d, "Muster, Max *25.08.1983"))
+        self.assertFalse(g(d, "Rechnungsdatum 25.08.1983"))
+        self.assertFalse(g(d, "geb. 25.08.1983\nRechnung vom 25.08.1983"))   # steht auch ohne Geburtsbezeichnung da
+        self.assertFalse(g(d, "Gebuehr faellig am 25.08.1983"))               # "Geb" in "Gebuehr" zaehlt nicht
+        self.assertFalse(g(d, "kein Datum im Text"))
+        # in der Auswertung: das Datum wird verworfen und der Beleg geht wegen fehlendem Datum in die Pruefung
+        raw = copy.deepcopy(LLM_RECHNUNG)
+        raw["issue_date"] = "1983-08-25"
+        i = invoice.normalize(raw, "Test GmbH")
+        text = RECHNUNG_TEXT.replace("Datum 03.11.2026", "Patient geb. 25.08.1983")
+        self.assertIn("RECHNUNGSDATUM_VERWORFEN", invoice.complete_vat(i, text))
+        self.assertIsNone(i["issue_date"])
+        self.assertIn("FEHLT_RECHNUNGSDATUM", invoice.validate(i, text))
+
+    def test_handschriftliches_datum_und_betrag_von_zwei_bildmodellen(self):
+        # Datum und Betrag von Hand: nicht im erkannten Text, aber beide Bildmodelle lesen dasselbe
+        from nopaper import ocr
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e.update(issue_date="2026-11-17", due_date=None)
+        e["payment"]["reference"] = None
+        e["totals"].update(net_total=2468.10, gross_total=2468.10, amount_due=2468.10)
+        e["vat_breakdown"][0]["basis"] = 2468.10
+        W.extraktion, W.bild_extraktion = e, copy.deepcopy(e)
+        self.cfg.extraktor, self.cfg.modell_extraktion = "nuextract3", "numind/nuextract3:Q6_K"
+        self.cfg.nuextract_eingabe = "bild"
+        W.docs[99] = {"id": 99, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG handschrift", "archive": b"A"}
+        alt = ocr.seiten_als_bilder
+        ocr.seiten_als_bilder = lambda *a, **k: ["QklMRA=="]
+        try:
+            self.np.nachbearbeitung_abfragen()
+            _, note = self.note(99)
+            self.assertIn("DATUM_ZWEI_BILDLESUNGEN", note["pruefhinweise"])
+            self.assertIn("BRUTTO_ZWEI_BILDLESUNGEN", note["pruefhinweise"])
+            self.assertNotIn("DATUM_NICHT_IM_TEXT", note["pruefhinweise"])
+            self.assertNotIn("BRUTTO_NICHT_IM_TEXT", note["pruefhinweise"])
+            # lesen die beiden verschieden, bleibt der Beleg in der Pruefung
+            W.bild_extraktion["issue_date"] = "2026-11-11"
+            W.docs[99]["tags"] = [5]
+            self.np.nachbearbeitung_abfragen()
+            _, note = self.note(99)
+            self.assertIn("DATUM_NICHT_IM_TEXT", note["pruefhinweise"])
+            self.assertEqual(note["pruefstatus"], "pruefen")
+        finally:
+            ocr.seiten_als_bilder = alt
 
     def test_ollama_weg(self):
         self.np.ki.url = "http://127.0.0.1:1"

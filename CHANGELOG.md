@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.7.4
+
+- **Dokumentdatum in paperless** (E66): In der Betriebsart „erst paperless“ setzt nopaper „Erstellt am“ auf das Rechnungsdatum, wenn dieses gesichert ist. paperless nimmt sonst das erste Datum im Text, auf Formularen oft ein Geburtsdatum. Abschaltbar mit `"dokumentdatum_setzen": false`.
+- **Ein Geburtsdatum ist nie das Rechnungsdatum:** Ein Datum, das im Text nur als Geburtsdatum bezeichnet ist, wird verworfen (`RECHNUNGSDATUM_VERWORFEN`).
+- **Handschriftliches Datum und handschriftlicher Betrag:** Lesen NuExtract am Bild und das Rückfall-Bildmodell denselben Wert, gilt er als belegt (`DATUM_ZWEI_BILDLESUNGEN`, `BRUTTO_ZWEI_BILDLESUNGEN`), auch wenn die Texterkennung ihn nicht lesen kann.
+
 ## 1.7.3
 
 - **Steuer nur, wenn der Beleg sie ausweist** (E65): Liefert das Modell einen Steuerbetrag, auf dem Beleg steht aber weder ein Prozentsatz noch ein Steuerwort (oder nur ein Befreiungshinweis), und der rechnerische Satz ist weder 7 noch 19 %, setzt nopaper Steuer 0 und Netto = Brutto (`STEUER_NICHT_AUSGEWIESEN`). Eine vom Modell gelieferte, in sich stimmige Steuerzeile zu 7 oder 19 % bleibt unangetastet. Anlass: Porto wurde als Steuer gelesen.

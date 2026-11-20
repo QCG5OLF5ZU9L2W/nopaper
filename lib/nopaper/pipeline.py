@@ -29,7 +29,10 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
                  "BRUTTO_AUS_AUFSCHLUESSELUNG", "UST_NULLSATZ_KORRIGIERT", "UST_SATZ_BERECHNET",
                  "BEFREIUNGSGRUND_ERSETZT", "STEUERNUMMER_VERWORFEN", "RECHNUNGSNUMMER_VERWORFEN", "RUECKGELD_ERKANNT", "VERWENDUNGSZWECK_VERWORFEN", "VERWENDUNGSZWECK_AUS_TEXT", "RECHNUNGSNUMMER_ABWEICHEND", "ZAHLUNG_AUS_TEXT", "FAELLIGKEIT_BERECHNET", "SKONTO_VERWORFEN", "ZWEITE_LESUNG", "GLAETTUNG_UEBERSPRUNGEN",
                  "VERSICHERUNGSTEUER_KORRIGIERT", "RECHNUNGSNUMMER_AUS_BILD", "RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN",
-                 "STEUER_NICHT_AUSGEWIESEN"}
+                 "STEUER_NICHT_AUSGEWIESEN", "RECHNUNGSDATUM_VERWORFEN",
+                 "DATUM_ZWEI_BILDLESUNGEN", "BRUTTO_ZWEI_BILDLESUNGEN"}
+# Pruefcodes, bei denen das Rechnungsdatum nicht als gesichert gilt
+DATUM_UNSICHER = ("FEHLT_RECHNUNGSDATUM", "DATUM_NICHT_IM_TEXT", "DATUM_MEHRDEUTIG", "RECHNUNGSDATUM_IN_ZUKUNFT")
 TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
 # Fehler, die ein neuer Versuch nicht behebt: sofort Ausloeser entfernen und Pruef-Tag setzen
 ENDGUELTIG = ("FORMAT_NICHT_UNTERSTUETZT", "KEIN_OCR_TEXT")
@@ -94,6 +97,20 @@ def nummer_aus_bild(inv: dict, issues: list[str], notes: list[str], nr_erst, ers
         notes.append("RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN")
 
 
+def zwei_bildlesungen(inv: dict, issues: list[str], notes: list[str], inv_erst: dict, erst_bild: bool,
+                      inv_bild: dict) -> None:
+    """Von Hand eingetragenes Datum oder Betrag (E66): Die Texterkennung liest Handschrift nicht, der Wert
+    kann also nie im Text verankert werden. Lesen zwei verschiedene Bildmodelle (NuExtract am Bild und das
+    Rueckfall-Bildmodell) unabhaengig denselben Wert, gilt er als belegt."""
+    if not erst_bild:
+        return
+    for code, key, hinweis in (("DATUM_NICHT_IM_TEXT", "issue_date", "DATUM_ZWEI_BILDLESUNGEN"),
+                               ("BRUTTO_NICHT_IM_TEXT", "gross", "BRUTTO_ZWEI_BILDLESUNGEN")):
+        if code in issues and inv[key] is not None and inv_erst[key] == inv_bild[key] == inv[key]:
+            issues[:] = [i for i in issues if i != code]
+            notes.append(hinweis)
+
+
 def extraktions_modell(c: Config) -> str:
     return c.modell_extraktion if c.extraktor == "nuextract3" else c.modell_text
 
@@ -141,12 +158,13 @@ def rechnung_auslesen(c: Config, ki: llm.Ollama, seite_als_bild, original: Path,
             raw2 = llm.rechnungsdaten_bild(ki, c.modell_bild, bild)
             raw2["kategorie"] = inv["kategorie"]
             inv2, issues2, notes2 = auswerten(raw2, beleg)
-            nr_erst, erst_bild = inv["invoice_number"], methode == "bild"
+            nr_erst, erst_bild, inv_erst = inv["invoice_number"], methode == "bild", inv
             if len(rot(issues2)) < len(rot(issues)):
                 inv, notes, issues = inv2, notes2 + ["BILDMODELL_VERWENDET"], issues2
                 methode, modell = "bild", c.modell_bild
             if ist_scan:
                 nummer_aus_bild(inv, issues, notes, nr_erst, erst_bild, inv2["invoice_number"], beleg)
+                zwei_bildlesungen(inv, issues, notes, inv_erst, erst_bild, inv2)
         except ocr.OcrError as e:
             log.warning("bild-rueckfall nicht moeglich (%s)", e)
     if "ZWEITE_LESUNG" not in notes and beleg is not text:
@@ -377,6 +395,17 @@ class Nopaper:
         }
         return invoice.build_cii(inv, prov)
 
+    def _dokumentdatum(self, doc_id: int, inv: dict, issues: list[str]) -> None:
+        """Das Dokumentdatum in paperless ("Erstellt am") auf das Rechnungsdatum setzen (E66). paperless nimmt
+        sonst das erste Datum im Text – auf Formularen mit handschriftlichem Datum ist das oft das gedruckte
+        Geburtsdatum. Nur bei gesichertem Datum; ein Fehlschlag haelt den Beleg nicht auf."""
+        if not self.cfg.dokumentdatum_setzen or inv["issue_date"] is None or set(DATUM_UNSICHER) & set(issues):
+            return
+        try:
+            self.pl.aendern(doc_id, {"created": inv["issue_date"].isoformat()})
+        except PaperlessFehler as e:
+            log.warning("dokumentdatum doc=%s nicht gesetzt (%s)", doc_id, e.code)
+
     def _duplikat(self, inv: dict, doc_id: int) -> int | None:
         """Gleicher Absender und gleiche Rechnungsnummer schon vorhanden? Liefert die ID des anderen Dokuments.
         Scanner-Betrieb: eigener Index (nur Hashes). Zustandslos: Abfrage der Erkannt-Felder in paperless."""
@@ -563,6 +592,7 @@ class Nopaper:
                     aenderung["custom_fields"] = [f for f in aenderung["custom_fields"] if f["field"] != fid] + [
                         {"field": fid, "value": xml.decode("utf-8")}]
                 self.pl.aendern(doc_id, aenderung)
+                self._dokumentdatum(doc_id, inv, issues)
             else:
                 self.pl.aendern(doc_id, aenderung)
                 self._sidecar(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a, methode,

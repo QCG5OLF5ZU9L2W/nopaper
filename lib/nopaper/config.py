@@ -85,6 +85,7 @@ class Config:
     kumero_ca_datei: str = ""
     test: Path = Path("/srv/nopaper/test")
     betriebsart: str = "scanner"           # scanner (bisher) | paperless (E61: erst paperless, zustandslos)
+    dokumentdatum_setzen: bool = True      # nur Betriebsart paperless: "Erstellt am" = Rechnungsdatum (E66)
 
     @property
     def zustandslos(self) -> bool:
@@ -221,6 +222,7 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         nuextract_seiten=int(mod.get("nuextract_seiten", 3)),
         kategorie_tags=kategorie_tags,
         betriebsart=betriebsart,
+        dokumentdatum_setzen=bool(d.get("dokumentdatum_setzen", True)),
     )
     if not testlauf and (not cfg.empfaenger or cfg.empfaenger.lower().startswith("muster")):
         raise ConfigError("empfaenger ist noch der Platzhalter – bitte den Namen der eigenen Organisation eintragen")
