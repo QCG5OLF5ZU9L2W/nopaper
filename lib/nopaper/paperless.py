@@ -114,6 +114,10 @@ class Paperless:
             self._cache.pop("tags", None)
         return dict(self._ids("tags"))
 
+    def tags_frisch(self) -> dict[str, int]:
+        """Alle Tags direkt aus paperless, ohne den Zwischenspeicher zu beruehren (darf aus dem Vorlauf laufen)."""
+        return {str(o["name"]).lower(): int(o["id"]) for o in self.alle("tags")}
+
     def tag_ids(self, namen: list[str]) -> list[int]:
         ids, fehlt = [], []
         for n in namen:
