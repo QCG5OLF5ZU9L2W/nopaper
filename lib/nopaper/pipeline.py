@@ -171,6 +171,10 @@ def rechnung_auslesen(c: Config, ki: llm.Ollama, seite_als_bild, original: Path,
     methode = "bild" if (c.extraktor == "nuextract3" and c.nuextract_eingabe == "bild"
                          and original.suffix.lower() == ".pdf" and not ocr.ist_digital(original)) else "text"
     modell = extraktions_modell(c)
+    if not invoice.ist_rechnungsartig(inv["kategorie"]):
+        # E77: Was keine Rechnung ist, nimmt ohnehin den Volltext-Weg. Zweite Texterkennung und Bild-Rueckfall
+        # koennten daran nichts aendern (die Kategorie bliebe) und kosten nur Zeit und einen Modellwechsel.
+        return inv, issues, notes, methode, modell
     if rot(issues) and original.suffix.lower() == ".pdf" and not ocr.ist_digital(original):
         zweit = zweite_lesung(original, workdir, c.ocr_sprache)
         if zweit.strip():
@@ -647,8 +651,11 @@ class Nopaper:
                 pruefen = ohne_betrag and not termin.ist_ladung(roh) and (
                     kat not in ("behoerde", "versicherung") or re.search(r"€|\bEUR\b|\bEuro\b", roh) is not None)
                 log.info("nachbearbeitung doc=%s KEINE_RECHNUNG kategorie=%s -> volltext-weg", doc_id, kat or "-")
-                self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0, pruefen=pruefen,
-                                  vorweg=("KEINE_RECHNUNG",))
+                felder, titel, mcodes = self._mahnung(inv, roh) if kat == "mahnung" else ({}, None, [])
+                self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0,
+                                  pruefen=pruefen or "MAHNUNG_BETRAG_NICHT_GELESEN" in mcodes,
+                                  vorweg=("KEINE_RECHNUNG", *mcodes), zusatz_felder=felder, titel=titel,
+                                  zusatz_tags=self.tag_kategorie.get(kat, []) if kein_beleg else [])
                 return "keine_rechnung"
             log.info("doc=%s ausgelesen als %s (%.0fs): text glaetten, codes lesen, in paperless schreiben", doc_id,
                      kat or "-", time.monotonic() - t0)
@@ -750,8 +757,46 @@ class Nopaper:
             doc = self.pl.dokument(doc_id)      # frisch: Tags und Felder koennen sich seit dem Vorlauf geaendert haben
             return self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_text, t0)
 
+    def _mahnung(self, inv: dict, roh: str) -> tuple[dict[int, object], str | None, list[str]]:
+        """Zahlungsangaben einer Mahnung fuer die Felder (E77): Absender, Datum, offener Betrag, IBAN und
+        Verwendungszweck – jeder Wert nur, wenn er im Text steht. Keine Rechnungs-Tags, kein Sidecar: Die
+        Forderung selbst ist schon mit der Rechnung gekommen und soll nicht zweimal zum Buchen anstehen."""
+        flach = invoice._zahl_text(roh)
+        kompakt = re.sub(r"\s+", "", roh).upper()
+
+        def betrag_belegt(d) -> bool:
+            return d is not None and d > 0 and any(v in flach for v in invoice.amount_variants(d))
+
+        betrag = next((d for d in (inv["due"], inv["gross"]) if betrag_belegt(d)), None)
+        name = inv["seller"]["name"]
+        if name and invoice.name_im_text(name, roh) < 0.6:
+            name = None
+        datum = inv["issue_date"]
+        if datum and (not invoice.datum_im_text(datum, roh) or invoice.datum_ist_geburtsdatum(datum, roh)):
+            datum = None
+        iban = inv["iban"]
+        if iban and not (invoice.iban_ok(iban) and re.sub(r"\s+", "", iban).upper() in kompakt):
+            iban = None
+        zweck = inv["payment_reference"]
+        if zweck and re.sub(r"\s+", "", zweck).upper() not in kompakt:
+            zweck = None
+        m = dict(inv, kategorie="mahnung", invoice_number=None, issue_date=datum, due_date=None, delivery_date=None,
+                 gross=None, net=None, tax=None, vat=[], skonto=[], due=betrag, iban=iban, payment_reference=zweck,
+                 seller=dict(inv["seller"], name=name))
+        codes = ["MAHNUNG"] if betrag is not None else ["MAHNUNG", "MAHNUNG_BETRAG_NICHT_GELESEN"]
+        titel = None
+        if datum or name:
+            teile = [datum.isoformat() if datum else "", re.sub(r"\s+", " ", name or "")[:60].strip(), "Mahnung",
+                     (invoice.money(betrag).replace(".", ",") + " " + (inv["currency"] or "EUR")) if betrag else ""]
+            titel = " ".join(t for t in teile if t)[:127]
+        felder = self._feldwerte(m, "ok")
+        if "pruefstatus" in self.felder:
+            felder.pop(self.felder["pruefstatus"][0], None)
+        return felder, titel, codes
+
     def _dokumentweg(self, doc_id: int, doc: dict, original: Path, workdir: Path, roh: str, ausloeser: int,
-                     t0: float, pruefen: bool = False, vorweg: tuple = ()) -> str:
+                     t0: float, pruefen: bool = False, vorweg: tuple = (), zusatz_felder: dict | None = None,
+                     titel: str | None = None, zusatz_tags=()) -> str:
         """Kern des Volltext-Wegs fuer ein Dokument, das keine Rechnung ist: Text glaetten und (wenn nicht
         schlechter) zurueckschreiben, Termin einer Ladung und Codes in die eingerichteten Felder, Ausloeser
         entfernen – alles in einem Aufruf. `pruefen` setzt zusaetzlich den Pruef-Tag."""
@@ -761,18 +806,21 @@ class Nopaper:
         tcodes, tfelder = self._termin(roh, text)
         if "barcode" in self.felder or "qrcode" in self.felder:
             tfelder.update(self._code_felder(self.codes_lesen(original, workdir)))
+        tfelder.update(zusatz_felder or {})
         alt = doc.get("content") or ""
         ersetzen = ocr.text_nicht_schlechter(alt, text)
         az_tags, az_codes = self._aktenzeichen(roh, text)
         tcodes = tcodes + az_codes
         tags = set(doc.get("tags") or [])
         tags.discard(ausloeser)
-        tags |= set(az_tags)
+        tags |= set(az_tags) | set(zusatz_tags)
         if self.tag_pruefen and (pruefen or {"TERMIN_NICHT_ERKANNT", "TERMIN_MEHRDEUTIG"} & set(tcodes)):
             tags.add(self.tag_pruefen)      # z.B. Ladung ohne sicheren Termin: ein Mensch muss hinsehen
         aenderung: dict = {"tags": sorted(tags)}
         if ersetzen:
             aenderung["content"] = text
+        if titel:
+            aenderung["title"] = titel
         if tfelder:
             aenderung["custom_fields"] = self._felder_mischen(doc.get("custom_fields"), tfelder)
         self.pl.aendern(doc_id, aenderung)

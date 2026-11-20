@@ -51,6 +51,16 @@ POSITIONEN = [
      "inhalt": None, "einzelpreis": "434,5600", "gesamtpreis": "434,5600", "steuersatz": None},
 ]
 
+MAHNUNG_TEXT = """Musterkasse des Landes                 Datum: 04.03.2026
+Bankverbindung: IBAN: DE89 3704 0044 0532 0130 00
+Kassenzeichen:  0912340001234
+MAHNUNG
+Aktenzeichen:   7 A 1234/26 MS
+Die Forderung war am 02.02.2026 faellig.
+Hauptforderung:   341,00 EUR      bereits gezahlt:   0,00 EUR
+Mahnung:            5,00 EUR      noch zu zahlen:  346,00 EUR
+"""
+
 LADUNG_TEXT = """Verwaltungsgericht Musterstadt
 Musterallee 1, 12345 Musterstadt                      Musterstadt, 12.11.2026
 Az.: 7 A 1234/26 MS
@@ -302,6 +312,8 @@ def fake_ocr(original: Path, workdir: Path, sprache: str = "deu") -> str:
                 "Neuer Termin: 15.01.2027, 11:00 Uhr, Saal 2\n")
     if b"LADUNG" in data:
         return LADUNG_TEXT
+    if b"MAHNUNG" in data:
+        return MAHNUNG_TEXT
     if b"POSRECHNUNG" in data:
         return RECHNUNG_TEXT + POSITIONEN_TEXT
     if b"HANDNR" in data:
@@ -1170,6 +1182,53 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(np.nachbearbeitung_abfragen(), 0)        # voruebergehend: Runde endet, nichts geht verloren
         self.assertTrue(all(5 in W.docs[i]["tags"] for i in (95, 96, 97)))
         self.assertFalse(list(self.cfg.arbeit.glob(".tmp-*")))
+
+    # ------------------------------------------------------------------ Mahnung (E77)
+    def mahnung_vorbereiten(self, **totals):
+        d = json.loads((self.tmp / "config.json").read_text())
+        d.setdefault("kategorie_tags", {})["mahnung"] = ["Mahnung"]
+        d["tags"]["aktenzeichen"] = True
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        W.tags[max(W.tags) + 1] = "Mahnung"
+        W.tags[max(W.tags) + 1] = "7 A 1234/26 MS"
+        np = self.paperless_zuerst()
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e.update(invoice_number=None, issue_date="2026-03-04", due_date=None)
+        e["seller"] = dict(e["seller"], name="Musterkasse des Landes", tax_number=None)
+        e["payment"] = {"iban": "DE89 3704 0044 0532 0130 00", "bic": None, "reference": "0912340001234"}
+        e["totals"] = dict({"net_total": None, "tax_total": None, "gross_total": None, "prepaid": None,
+                            "amount_due": 346.00}, **totals)
+        e["vat_breakdown"] = []
+        W.extraktion, W.einordnung = e, "mahnung"
+        return np
+
+    def test_mahnung_zahlungsangaben_ohne_buchungsvorschlag(self):
+        np = self.mahnung_vorbereiten()
+        W.docs[99] = {"id": 99, "content": "x", "title": "Scan_0001", "tags": [3, 5], "custom_fields": [],
+                      "owner": None, "original": b"%PDF MAHNUNG 1", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(self.tagnamen(99), {"Scan", "Mahnung", "7 A 1234/26 MS"})    # keine Rechnungs-Tags
+        self.assertEqual(self.feld(99, "Erkannt: Belegart"), "mahnung")
+        self.assertEqual(self.feld(99, "Erkannt: Zahlbetrag"), "EUR346.00")
+        self.assertEqual(self.feld(99, "IBAN"), "DE89370400440532013000")
+        self.assertEqual(self.feld(99, "Erkannt: Verwendungszweck"), "0912340001234")
+        self.assertEqual(self.feld(99, "Erkannt: Rechnungssteller"), "Musterkasse des Landes")
+        self.assertEqual(self.feld(99, "Erkannt: Rechnungsdatum"), "2026-03-04")
+        self.assertIsNone(self.feld(99, "Erkannt: Betrag brutto"))
+        self.assertIsNone(self.feld(99, "Erkannt: Sidecar"))                           # kein Buchungsvorschlag
+        self.assertEqual(W.docs[99]["title"], "2026-03-04 Musterkasse des Landes Mahnung 346,00 EUR")
+        self.assertEqual(len(W.patches), 1)
+        # kein Bild-Rueckfall und keine zweite Lesung fuer ein Dokument, das keine Rechnung ist
+        self.assertFalse([c for c in W.llm_calls if c[2]])
+
+    def test_mahnung_ohne_belegten_betrag_geht_in_die_pruefung(self):
+        np = self.mahnung_vorbereiten(amount_due=999.99)          # steht nicht im Text
+        W.docs[99] = {"id": 99, "content": "x", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF MAHNUNG 2", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertIsNone(self.feld(99, "Erkannt: Zahlbetrag"))
+        self.assertIn("nopaper prüfen", self.tagnamen(99))
+        self.assertEqual(self.feld(99, "Erkannt: Belegart"), "mahnung")
 
     def test_fehlerantwort_nur_feldnamen(self):
         from nopaper.paperless import _fehlerschluessel

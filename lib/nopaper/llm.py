@@ -325,7 +325,9 @@ kategorie: rechnung (Lieferanten-/Dienstleisterrechnung, auch Webshop/Tickets mi
 kassenbon (Supermarkt, Tankstelle, Post), bewirtung (Restaurant), versicherung (Beitragsrechnung), behoerde
 (Kostenrechnung/Gebuehrenbescheid von Behoerde oder Gericht), mahnung, bestellbestaetigung, buchungsbestaetigung
 (Reise/Hotel ohne Rechnungsnummer), lieferschein (auch Packzettel, Wareneingangsformular), brief, sonstiges.
-Bei mahnung, bestellbestaetigung, buchungsbestaetigung, lieferschein, brief, sonstiges alle anderen Felder leer.
+Bei bestellbestaetigung, buchungsbestaetigung, lieferschein, brief, sonstiges alle anderen Felder leer.
+Bei mahnung nur: seller (der Absender), issue_date (Datum des Schreibens), totals.amount_due (der insgesamt noch zu
+zahlende Betrag einschliesslich Mahngebuehr), payment.iban, payment.bic, payment.reference; alles andere leer.
 seller ist der Rechnungssteller, nie der Empfaenger. Eingangsstempel ignorieren; massgeblich ist das gedruckte Datum.
 invoice_number: Rechnungs-, Beleg- oder Bonnummer - nicht Kunden-, Auftrags-, Steuer-, Terminal- oder Kassennummer.
 Auch eine von Hand eingetragene Nummer (z.B. hinter "RE-Nr. ......") uebernehmen, genau wie geschrieben.

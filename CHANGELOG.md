@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.5
+
+- **Mahnungen** (E77): Eine Mahnung bekommt jetzt die Zahlungsangaben in die Felder – Belegart „mahnung“, Absender, Datum, Zahlbetrag, IBAN, Verwendungszweck – und den Titel `Datum Absender Mahnung Betrag`. Sie bekommt bewusst **keine** Rechnungs-Tags und **keinen** Sidecar, damit dieselbe Forderung nicht zweimal zum Buchen ansteht. Ist der Betrag nicht sicher gelesen, geht sie in die Prüfung.
+- **Eigenes Tag je Kategorie auch für Dokumente, die keine Rechnung sind:** `kategorie_tags` gilt jetzt für alle Kategorien, zum Beispiel `"mahnung": ["Mahnung"]` oder `"lieferschein": ["Lieferschein"]`. Das Tag muss in paperless vorhanden sein.
+- **Schneller bei allem, was keine Rechnung ist:** Für solche Dokumente entfallen die zweite Texterkennung und der Bild-Rückfall. Beide liefen bisher bei jedem Brief mit, konnten am Ergebnis nichts ändern und kosteten Zeit und einen Modellwechsel.
+
 ## 1.9.4
 
 - **Kontext je Aufruf nach Bedarf** (E76): `modelle.kontext` ist jetzt die Obergrenze, nicht mehr der Wert für jeden Aufruf. Jeder Aufruf bekommt die kleinste Stufe (8.192, 16.384, 32.768, 65.536 Token), in die er passt. Ein kurzes Dokument und das einzelne Seitenbild des Bild-Rückfalls laufen mit 8.192, drei Seitenbilder mit 16.384; nur lange Dokumente bekommen den großen Kontext.

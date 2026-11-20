@@ -186,7 +186,9 @@ kategorie:
 - "bewirtung": Restaurant-/Bewirtungsrechnung
 - "versicherung": Beitragsrechnung einer Versicherung
 - "behoerde": Kostenrechnung, Gebuehren- oder Kostenbescheid einer Behoerde oder eines Gerichts
-- "mahnung": Mahnung oder Zahlungserinnerung (auch wenn Rechnungsnummern darin stehen)
+- "mahnung": Mahnung oder Zahlungserinnerung (auch wenn Rechnungsnummern darin stehen). Dabei nur auslesen:
+  seller (der Absender), issue_date (Datum des Schreibens), totals.amount_due (der insgesamt noch zu zahlende
+  Betrag einschliesslich Mahngebuehr), payment (IBAN, BIC, Verwendungszweck/Kassenzeichen); alles andere null.
 - "bestellbestaetigung": Bestell- oder Auftragsbestaetigung
 - "buchungsbestaetigung": Reise- oder Hotelbuchungsbestaetigung OHNE Rechnungsnummer
 - "lieferschein": Lieferschein, Packzettel, Wareneingangsformular
