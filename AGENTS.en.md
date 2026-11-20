@@ -310,6 +310,24 @@ Items 1–4 are implemented with defaults in version 1.0 (E15). If the owner cha
 
 Result: NuExtract in image mode is on a par with qwen, and probably better with the corrections from 1.4 (E30–E32). Text mode is weaker (a postal receipt as a letter, a petrol receipt as a credit note). On CPU image mode is slower than text; with a GPU this does not matter. All values come from the training set; an independent test set is pending.
 
+15. **Return path for learning through paperless (E68) – postponed until booking from the sidecar works in kumero.** To be settled in the design:
+    a. **"Verified, but not on the document":** in the corrections file this was an explicit `null`, as opposed to "field missing = unverified" (E39). A paperless field does not carry this difference by itself; kumero has to express it.
+    b. **Where what has been learned lives:** supplier knowledge and learning examples (E37, E51) are state, and a stateless nopaper (E61) cannot keep them itself. Possible way: for each document, query the most recently booked documents of the same seller from paperless and use them as examples instead of keeping own profiles. This decides whether "stateless" can be kept up for learning or a small derived store becomes necessary.
+    c. **Tenant separation (E51):** then follows from the separate paperless instances; to be confirmed.
+
+16. **Further open points from the work on 2026-11-19/20:**
+    a. **Measurement is pending.** Between 1.5.3 and 1.8.1 eight rule changes and four prompt additions were made, all checked only with offline tests and individual real documents. Before further rules: a run over the sample documents with expected-value files (`nopaper test`), plus one long wholesale invoice (E58).
+    b. **Pickup of the sidecar by kumero** from the field in paperless (E61 g) – to be built on the kumero side.
+    c. **Remove scanner mode** (incoming folders, `state.py`, `kumero.py`) once "paperless first" mode has been tried (E61).
+    d. **One trigger for everything:** since E63 the invoice trigger only reports "not an invoice". Open: whether a single tag should suffice and nopaper itself chooses between the invoice path and the full-text path.
+    e. **Title, correspondent and document type for documents that are not invoices.** Two decisions are missing: whether nopaper may overwrite what paperless guessed, and what happens with a sender that does not exist in paperless yet.
+    f. **Full text by an image model** instead of Tesseract plus smoothing (E49) – not decided; first only as a comparison in the test run.
+    g. **Context per call:** smoothing and other short calls run with the same large context as reading long documents; that costs memory and loading time.
+    h. **Codes:** DataMatrix is not read (the example held only machine control characters, so it was not built); the fiscal QR code on till receipts is only stored as text, not evaluated (E67).
+    i. **Outgoing invoices:** nopaper is built for incoming documents and sets the recipient from the configuration; for an invoice issued by the practice itself, issuer and recipient are then the same.
+    j. **Negative amounts** (E60): whether paperless and kumero accept them in the fields has not been confirmed on the real system.
+    k. **Assigning scanned letters to patients** – a separate undertaking outside nopaper; open are the practice software, access to the patient master data and the filing path.
+
 ## 13. Code layout (version 1.8.1)
 
 | File | Content |

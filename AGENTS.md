@@ -362,6 +362,24 @@ Die Punkte 1–4 sind in Version 1.0 mit Standardwerten umgesetzt (E15). Ändert
 
 Ergebnis: NuExtract im Bild-Modus ist gleichauf mit qwen, mit den Korrekturen aus 1.4 (E30–E32) voraussichtlich besser. Der Text-Modus ist schwächer (ein Postbeleg als Brief, ein Tankbeleg als Gutschrift). Auf CPU ist der Bild-Modus langsamer als der Text; mit GPU spielt das keine Rolle. Alle Werte stammen aus dem Trainingssatz; ein unabhängiger Testsatz steht aus.
 
+15. **Rückweg zum Lernen über paperless (E68) – zurückgestellt, bis das Buchen aus dem Sidecar in kumero läuft.** Beim Entwurf zu klären:
+    a. **„Geprüft, aber steht nicht auf dem Beleg“:** In der Korrekturdatei war das ein ausdrückliches `null`, im Unterschied zu „Feld fehlt = ungeprüft“ (E39). Ein paperless-Feld kennt diesen Unterschied nicht von selbst; kumero muss ihn ausdrücken.
+    b. **Wo das Gelernte liegt:** Lieferantenwissen und Lernbeispiele (E37, E51) sind Zustand, ein zustandsloses nopaper (E61) kann sie nicht selbst führen. Möglicher Weg: bei jedem Beleg die zuletzt gebuchten Belege desselben Rechnungsstellers aus paperless abfragen und als Beispiele nutzen, statt eigene Profile zu pflegen. Hier entscheidet sich, ob „zustandslos“ beim Lernen durchzuhalten ist oder ein kleiner abgeleiteter Bestand nötig wird.
+    c. **Mandantentrennung (E51):** ergibt sich dann aus den getrennten paperless-Instanzen; zu bestätigen.
+
+16. **Weitere offene Punkte aus der Arbeit am 2026-11-19/20:**
+    a. **Messung steht aus.** Zwischen 1.5.3 und 1.8.1 sind acht Regeländerungen und vier Prompt-Ergänzungen entstanden, alle nur mit Offline-Tests und einzelnen Echtbelegen geprüft. Vor weiteren Regeln: Lauf über die Musterbelege mit Soll-Dateien (`nopaper test`), dazu eine lange Großhandelsrechnung (E58).
+    b. **Abholung des Sidecars durch kumero** aus dem Feld in paperless (E61 g) – auf der Seite von kumero zu bauen.
+    c. **Scanner-Betrieb entfernen** (Eingangsordner, `state.py`, `kumero.py`), sobald die Betriebsart „erst paperless“ erprobt ist (E61).
+    d. **Ein Auslöser für alles:** Der Rechnungs-Auslöser meldet seit E63 nur noch „keine Rechnung“. Offen ist, ob ein einziger Tag genügen soll und nopaper selbst zwischen Rechnungsweg und Volltext-Weg wählt.
+    e. **Titel, Korrespondent und Dokumenttyp für Dokumente, die keine Rechnung sind.** Zwei Entscheidungen fehlen: ob nopaper überschreiben darf, was paperless geraten hat, und was bei einem Absender geschieht, den es in paperless noch nicht gibt.
+    f. **Volltext durch ein Bildmodell** statt Tesseract plus Glättung (E49) – nicht entschieden; zuerst nur als Vergleich im Testlauf.
+    g. **Kontext je Aufruf:** Glättung und andere kurze Aufrufe laufen mit demselben großen Kontext wie das Auslesen langer Dokumente; das kostet Speicher und Ladezeit.
+    h. **Codes:** DataMatrix wird nicht gelesen (am Beispiel nur Maschinensteuerzeichen, daher nicht gebaut); der QR-Code der Kassensicherung auf Bons wird nur als Text gespeichert, nicht ausgewertet (E67).
+    i. **Ausgangsrechnungen:** nopaper ist für Eingangsbelege gebaut und setzt den Empfänger aus der Konfiguration; bei einer eigenen Rechnung der Praxis sind Aussteller und Empfänger dann gleich.
+    j. **Negative Beträge** (E60): ob paperless und kumero sie in den Feldern annehmen, ist nicht am Echtsystem bestätigt.
+    k. **Patientenzuordnung gescannter Schreiben** – eigenes Vorhaben außerhalb von nopaper; offen sind Praxissoftware, Zugriff auf den Patientenstamm und der Ablageweg.
+
 ## 13. Aufbau des Codes (Version 1.8.1)
 
 | Datei | Inhalt |
