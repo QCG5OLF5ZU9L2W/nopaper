@@ -299,7 +299,7 @@ nopaper sucht dann in jedem Dokument, das es bearbeitet, nach den Namen der vorh
 
 - Leerzeichen, Punkte und Zeilenumbrüche dürfen im Text anders stehen als im Tag, Ziffern und Buchstaben nicht.
 - nopaper legt keinen Tag an. Zu einem neuen Verfahren muss der Tag in paperless angelegt sein, bevor das Dokument bearbeitet wird.
-- Stehen mehrere verschiedene Aktenzeichen mit eigenem Tag im Text, ordnet nopaper keinen zu.
+- Stehen mehrere Aktenzeichen mit eigenem Tag im Text, etwa das der Vorinstanz und das des Rechtsmittels, ordnet nopaper alle zu.
 
 `nopaper check` zeigt, wie viele Aktenzeichen-Tags es in paperless findet.
 

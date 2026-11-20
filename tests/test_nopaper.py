@@ -1070,7 +1070,9 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(t(text, {"az 7a 1234 / 26": 1}), ([1], False))                    # Schreibweise frei
         self.assertEqual(t("Az. 7 A\n1234/26", {"7 a 1234/26": 1}), ([1], False))           # Zeilenumbruch
         self.assertEqual(t(text, {"a 1234/2": 1, "7 a 1234/261": 2, "234/26": 3}), ([], False))  # keine Teilstuecke
-        self.assertEqual(t(text, {"7 a 1234/26": 1, "17 a 1234/26": 5}), ([], True))        # zwei Verfahren
+        self.assertEqual(t(text, {"7 a 1234/26": 1, "17 a 1234/26": 5}), ([1, 5], True))    # zwei Verfahren: beide
+        self.assertEqual(t("12 K 2059/21, BFH IX R 19/22", {"12 k 2059/21": 1, "ix r 19/22": 2, "x r 19/22": 3}),
+                         ([1, 2], True))                                                  # zwei Instanzen
         # zwei verschiedene Aktenzeichen: keines uebernehmen
         w, _ = e("Ladung\nAz.: 7 A 1234/26\nAktenzeichen: 3 K 99/25\nTermin anberaumt auf 15.01.2027, 11:00 Uhr\n")
         self.assertNotIn("aktenzeichen", w)

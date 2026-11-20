@@ -91,8 +91,8 @@ def aktenzeichen_tags(text: str, tags: dict[str, int]) -> tuple[list[int], bool]
     """Vorhandene Tags, deren Name ein Aktenzeichen ist und woertlich im Text steht (E70). Leerzeichen,
     Punkte, Doppelpunkte, Bindestriche und Zeilenumbrueche zwischen den Teilen duerfen abweichen, Ziffern
     und Buchstaben nicht. Steckt ein Treffer in einem laengeren ("7 A 1/26" in "7 A 1/26 MS"), zaehlt nur
-    der laengere. Liefert (Tag-IDs, mehrdeutig): Passen mehrere verschiedene Aktenzeichen, wird keines
-    zugeordnet."""
+    der laengere. Stehen mehrere Aktenzeichen im Text (etwa das der Vorinstanz und das des Rechtsmittels),
+    werden alle zugeordnet; der zweite Wert ist dann True."""
     treffer: dict[int, list[tuple[int, int]]] = {}
     for name, tid in tags.items():
         if not ist_aktenzeichen(name):
@@ -107,9 +107,7 @@ def aktenzeichen_tags(text: str, tags: dict[str, int]) -> tuple[list[int], bool]
         return all(any(o != tid and a2 <= a and e <= e2 and (e2 - a2) > (e - a)
                        for o, sp in treffer.items() for a2, e2 in sp) for a, e in treffer[tid])
     ids = sorted(t for t in treffer if not enthalten(t))
-    if len(ids) > 1:
-        return [], True
-    return ids, False
+    return ids, len(ids) > 1
 
 
 def erkennen(text: str) -> tuple[dict, list[str]]:
