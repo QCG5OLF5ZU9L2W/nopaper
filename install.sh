@@ -51,7 +51,7 @@ MEM_GB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))
 # --------------------------------------------------------------------- Pakete
 log "$OS_NAME-Pakete installieren (OCR, Python, Werkzeuge)"
 export DEBIAN_FRONTEND=noninteractive
-PAKETE=(python3 ocrmypdf tesseract-ocr tesseract-ocr-deu unpaper ghostscript poppler-utils
+PAKETE=(python3 ocrmypdf tesseract-ocr tesseract-ocr-deu unpaper ghostscript poppler-utils zbar-tools
         ca-certificates curl zstd)
 apt-get update
 if [[ "$OS_ID" == "ubuntu" ]]; then

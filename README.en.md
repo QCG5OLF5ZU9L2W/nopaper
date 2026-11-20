@@ -30,7 +30,7 @@ Decisions and rules are recorded in [`AGENTS.md`](AGENTS.md) (German). They are 
 - a running paperless-ngx, reachable over HTTPS
 - internet access only during installation (packages, Ollama, models)
 
-There are no dependencies apart from distribution packages (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`; on Ubuntu from the `universe` component) and Ollama. The code uses only the Python standard library.
+There are no dependencies apart from distribution packages (`ocrmypdf`, `tesseract-ocr-deu`, `poppler-utils`, `zbar-tools`; on Ubuntu from the `universe` component) and Ollama. The code uses only the Python standard library.
 
 ## Installation step by step
 
@@ -261,6 +261,19 @@ Limits: so far this mode has only run in the offline tests. The cross-check betw
 | Full text | tag from `tags.ausloeser_text` on the document | recognise and clean up the text again, replace the full text only; remove the tag |
 
 The full text is replaced only if the new text is not worse than the existing one.
+
+## Barcodes and QR codes
+
+nopaper reads the barcodes and QR codes on the first three pages of a document. Create the fields in paperless and enter them under `felder`; both are optional:
+
+| Key in `felder` | Data type | Content |
+|---|---|---|
+| `barcode` | Text | all barcodes, separated by " \| " |
+| `qrcode` | Long text | all QR codes |
+
+If an invoice carries a payment QR code, nopaper takes IBAN and payment reference from it, even without these two fields. If the amount in the code does not match the amount read, the document gets the review tag.
+
+Reading is done with `zbarimg` from the package `zbar-tools`, which `install.sh` installs. `nopaper check` shows whether it is present.
 
 ## Appointment from a court summons
 

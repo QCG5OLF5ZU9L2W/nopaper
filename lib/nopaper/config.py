@@ -12,6 +12,8 @@ DEFAULT_PATH = "/etc/nopaper/config.json"
 # Rechnungsdatum -> paperless-Datentyp
 FELD_TYPEN = {
     "sidecar": "longtext",          # nur Betriebsart "paperless": Sidecar (CII-XML) als Feld am Dokument
+    "barcode": "string",            # Strichcodes der ersten Seiten (E67)
+    "qrcode": "longtext",           # QR-Codes der ersten Seiten (E67)
     "termin": "date",               # Ladung: Tag der Verhandlung (E62)
     "terminzeit": "string",         # Ladung: Uhrzeit und Saal
     "aktenzeichen": "string",       # Ladung: Aktenzeichen des Gerichts

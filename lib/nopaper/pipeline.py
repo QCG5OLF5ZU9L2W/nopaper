@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import VERSION, invoice, llm, ocr, termin
+from . import VERSION, codes as qr, invoice, llm, ocr, termin
 from .config import FELD_TYPEN, Config
 from .kumero import Kumero
 from .paperless import Paperless, PaperlessFehler, Voruebergehend
@@ -30,7 +30,8 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
                  "BEFREIUNGSGRUND_ERSETZT", "STEUERNUMMER_VERWORFEN", "RECHNUNGSNUMMER_VERWORFEN", "RUECKGELD_ERKANNT", "VERWENDUNGSZWECK_VERWORFEN", "VERWENDUNGSZWECK_AUS_TEXT", "RECHNUNGSNUMMER_ABWEICHEND", "ZAHLUNG_AUS_TEXT", "FAELLIGKEIT_BERECHNET", "SKONTO_VERWORFEN", "ZWEITE_LESUNG", "GLAETTUNG_UEBERSPRUNGEN",
                  "VERSICHERUNGSTEUER_KORRIGIERT", "RECHNUNGSNUMMER_AUS_BILD", "RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN",
                  "STEUER_NICHT_AUSGEWIESEN", "RECHNUNGSDATUM_VERWORFEN",
-                 "DATUM_ZWEI_BILDLESUNGEN", "BRUTTO_ZWEI_BILDLESUNGEN"}
+                 "DATUM_ZWEI_BILDLESUNGEN", "BRUTTO_ZWEI_BILDLESUNGEN",
+                 "IBAN_AUS_QR", "VERWENDUNGSZWECK_AUS_QR", "BETRAG_IM_QR"}
 # Pruefcodes, bei denen das Rechnungsdatum nicht als gesichert gilt
 DATUM_UNSICHER = ("FEHLT_RECHNUNGSDATUM", "DATUM_NICHT_IM_TEXT", "DATUM_MEHRDEUTIG", "RECHNUNGSDATUM_IN_ZUKUNFT")
 TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
@@ -109,6 +110,32 @@ def zwei_bildlesungen(inv: dict, issues: list[str], notes: list[str], inv_erst: 
         if code in issues and inv[key] is not None and inv_erst[key] == inv_bild[key] == inv[key]:
             issues[:] = [i for i in issues if i != code]
             notes.append(hinweis)
+
+
+def girocode_anwenden(inv: dict, issues: list[str], notes: list[str], g) -> None:
+    """Ueberweisungs-QR-Code auf der Rechnung (E67). Sein Inhalt ist exakt gelesen und vom Rechnungssteller
+    selbst fuer die Zahlung gedacht – er geht dem vor, was ein Modell gelesen hat:
+    - IBAN und Verwendungszweck werden uebernommen;
+    - stimmt der Betrag mit Brutto oder Zahlbetrag ueberein, gilt der Betrag als belegt;
+    - weicht er von beiden ab, geht der Beleg in die Pruefung (QR_BETRAG_ABWEICHEND)."""
+    if g is None:
+        return
+    if invoice.iban_ok(g.iban):
+        if inv["iban"] != g.iban:
+            inv["iban"] = g.iban
+            notes.append("IBAN_AUS_QR")
+        issues[:] = [i for i in issues if i not in ("IBAN_NICHT_IM_TEXT", "IBAN_PRUEFZIFFER")]
+    if g.zweck and inv["payment_reference"] != g.zweck:
+        inv["payment_reference"] = g.zweck
+        notes.append("VERWENDUNGSZWECK_AUS_QR")
+    if g.betrag is not None:
+        if inv["gross"] is not None and g.betrag == inv["gross"]:
+            issues[:] = [i for i in issues if i != "BRUTTO_NICHT_IM_TEXT"]
+            notes.append("BETRAG_IM_QR")
+        elif inv["due"] is not None and g.betrag == inv["due"]:
+            notes.append("BETRAG_IM_QR")
+        elif inv["gross"] is not None:
+            issues.append("QR_BETRAG_ABWEICHEND")
 
 
 def extraktions_modell(c: Config) -> str:
@@ -217,7 +244,8 @@ class Merker:
 
 class Nopaper:
     def __init__(self, cfg: Config, pl: Paperless | None = None, ki: llm.Ollama | None = None,
-                 state: State | None = None, ocr_text=None, seite_als_bild=None, zweite_lesung=None):
+                 state: State | None = None, ocr_text=None, seite_als_bild=None, zweite_lesung=None,
+                 codes_lesen=None):
         self.cfg = cfg
         self.pl = pl or Paperless(cfg.paperless_url, cfg.token, cfg.ca_datei)
         self.ki = ki or llm.Ollama(cfg.ollama_url, cfg.num_ctx, cfg.ollama_timeout)
@@ -230,6 +258,7 @@ class Nopaper:
         self.ocr_text = ocr_text or ocr.ocr_text
         self.seite_als_bild = seite_als_bild or ocr.seite_als_bild
         self.zweite_lesung = zweite_lesung or ocr.zweite_lesung
+        self.codes_lesen = codes_lesen or qr.lesen
         self._ids_ok = False
         self._letzte_abfrage = 0.0
         # zustandslos: nur das Arbeitsverzeichnis fuer kurzlebige Dateien eines Durchlaufs
@@ -394,6 +423,20 @@ class Nopaper:
             "hinweis": SIDECAR_HINWEIS,
         }
         return invoice.build_cii(inv, prov)
+
+    def _code_felder(self, gelesen: list) -> dict[int, object]:
+        """Strich- und QR-Codes fuer die eingerichteten Felder (E67). Ein kurzes Textfeld fasst in paperless
+        128 Zeichen: Dort kommen nur so viele ganze Codes hinein, wie passen."""
+        out: dict[int, object] = {}
+        for key, zwei_d, trenner in (("barcode", False, " | "), ("qrcode", True, "\n---\n")):
+            if key not in self.felder:
+                continue
+            fid, typ = self.felder[key]
+            werte = [c.inhalt for c in gelesen if c.ist_2d == zwei_d]
+            v = qr.feldtext(werte, 128 if (typ or FELD_TYPEN[key]) in ("string", "url") else None, trenner)
+            if v is not None:
+                out[fid] = v
+        return out
 
     def _dokumentdatum(self, doc_id: int, inv: dict, issues: list[str]) -> None:
         """Das Dokumentdatum in paperless ("Erstellt am") auf das Rechnungsdatum setzen (E66). paperless nimmt
@@ -560,6 +603,8 @@ class Nopaper:
                          inv["kategorie"] or "-", time.monotonic() - t0)
                 return "keine_rechnung"
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
+            gelesen = self.codes_lesen(original, workdir)
+            girocode_anwenden(inv, issues, notes, qr.erster_girocode(gelesen))
             prev = self._duplikat(inv, doc_id)
             if prev is not None:
                 issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
@@ -577,7 +622,8 @@ class Nopaper:
             aenderung = {
                 "content": text,
                 "tags": sorted(tags),
-                "custom_fields": self._felder_mischen(doc.get("custom_fields"), self._feldwerte(inv, status)),
+                "custom_fields": self._felder_mischen(doc.get("custom_fields"),
+                                                      {**self._feldwerte(inv, status), **self._code_felder(gelesen)}),
             }
             neuer_titel = invoice.titel(inv, self.cfg.titel_rechnung)
             if neuer_titel:
@@ -658,6 +704,8 @@ class Nopaper:
                 raise PaperlessFehler("KEIN_OCR_TEXT")
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
             tcodes, tfelder = self._termin(roh, text)
+            if "barcode" in self.felder or "qrcode" in self.felder:
+                tfelder.update(self._code_felder(self.codes_lesen(original, workdir)))
         alt = doc.get("content") or ""
         ersetzen = ocr.text_nicht_schlechter(alt, text)
         tags = set(doc.get("tags") or [])
