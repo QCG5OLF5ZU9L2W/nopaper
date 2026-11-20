@@ -208,7 +208,8 @@ Regeln fuer die Rechnungsdaten:
 - tax_number ist die Steuernummer (auch "St.-Nr.", "Steuer-Nr."), vat_id die USt-IdNr. ("USt-ID", "Ust.-IdNr."),
   Leerzeichen darin entfernen.
 - totals.gross_total ist der Endbetrag ("Rechnungsbetrag", "Endbetrag", "Gesamtbetrag", "zu zahlen", "Total"),
-  nicht eine Zwischensumme. Versand, Gebuehren und Zuschlaege gehoeren in den Netto-/Endbetrag.
+  nicht eine Zwischensumme. Versand, Porto, Gebuehren und Zuschlaege gehoeren in den Netto-/Endbetrag und sind
+  keine Steuer. Weist der Beleg keine Umsatzsteuer aus, ist tax_total 0 und net_total = gross_total.
 - totals.net_total und totals.tax_total sind die SUMMEN ueber alle Steuersaetze. Bei mehreren "NETTO"-Zeilen
   (z.B. 7 % und 19 %) diese addieren; jede Zeile gehoert zusaetzlich in vat_breakdown.
 - vat_breakdown: eine Zeile je Steuersatz. Steuerfrei (z.B. "§ 4 Nr. 14 UStG", "§ 4 Nr. 10a UStG",
@@ -601,6 +602,27 @@ BEFREIUNG_STANDARD = {
 }
 
 
+# Woerter, die nur wie Steuer aussehen (Steuernummer, Finanzamt ...), und echte Hinweise auf ausgewiesene Steuer
+_KEIN_AUSWEIS = re.compile(
+    r"steuer\s?-?\s?(?:nummer|nr\b\.?|id\w*)|\bst\.?\s?-?\s?nr\b\.?|ust\.?\s?-?\s?id\w*\.?(?:\s?-?\s?nr\b\.?)?|"
+    r"vat\s?(?:id|no\b|number)|finanzamt|steuerberat\w*", re.I)
+_STEUERWORT = re.compile(r"m\s?w\s?s\s?t|mehrwertsteuer|umsatzsteuer|\bust\b|\bvat\b|\btax\b|\bnetto|\bbrutto|steuer|\bhust\b|mnst",
+                         re.I)
+_BEFREIT = re.compile(r"steuerfrei|steuerbefreit|§\s?4\s?Nr|§\s?19\s?(?:Abs\.?\s?\d\s?)?UStG|kleinunternehmer|"
+                      r"(?:ohne|keine|nicht)\s+(?:\w+\s+)?(?:umsatzsteuer|mehrwertsteuer|mwst)|nicht\s+umsatzsteuerbar", re.I)
+_PROZENT = re.compile(r"\d\s?%")
+
+
+def steuer_ausgewiesen(text: str) -> bool:
+    """True, wenn der Beleg Umsatzsteuer ausweisen kann: ein Prozentsatz steht im Text, oder ein Steuerwort
+    (MwSt, USt, netto, brutto ...) ohne Befreiungshinweis. "Steuernummer", "USt-IdNr." und "Finanzamt" zaehlen
+    nicht als Steuerwort."""
+    if _PROZENT.search(text):
+        return True
+    rest = _KEIN_AUSWEIS.sub(" ", text)
+    return _STEUERWORT.search(rest) is not None and _BEFREIT.search(rest) is None
+
+
 def complete_vat(inv: dict, text: str | None = None) -> list[str]:
     """Rechnerische Ergaenzung/Reparatur – nur wenn das Ergebnis in sich stimmig ist und (wo moeglich)
     durch den Text belegt wird. Jede Reparatur hinterlaesst einen Hinweis-Code."""
@@ -608,6 +630,21 @@ def complete_vat(inv: dict, text: str | None = None) -> list[str]:
     rows = inv["vat"]
     kat = inv.get("kategorie", "rechnung")
     flat = _zahl_text(text) if text else None
+
+    # 0) Der Beleg weist keine Umsatzsteuer aus, das Modell hat aber eine "Steuer" geliefert (z.B. Porto oder
+    #    Gebuehren als Steuer gelesen): keine Steuer, Netto = Brutto. Nur wenn der vermeintliche Satz weder
+    #    7 noch 19 % ist – sonst koennte die Texterkennung bloss das Steuerwort verloren haben.
+    if text and inv["gross"] is not None and inv["tax"] not in (None, 0) and not steuer_ausgewiesen(text):
+        satz = abs(inv["tax"] / inv["net"] * 100) if inv["net"] else None
+        # eine in sich stimmige Zeile zu 7 oder 19 % ist ein eigener Beleg fuer Steuer (vom Bild gelesen)
+        zeile_belegt = any(r["rate"] in (Decimal("7"), Decimal("19")) and r["basis"] is not None
+                           and r["tax"] is not None
+                           and abs(r["basis"] * r["rate"] / 100 - r["tax"]) <= TOL + Decimal("0.01") for r in rows)
+        if not zeile_belegt and (
+                satz is None or all(abs(satz - s) > Decimal("0.5") for s in (Decimal("7"), Decimal("19")))):
+            inv["tax"], inv["net"], inv["vat"] = Decimal("0"), inv["gross"], []
+            rows = inv["vat"]
+            notes.append("STEUER_NICHT_AUSGEWIESEN")
 
     # a) Steuersatz aus Basis/Steuer, wenn der Satz nicht passt (z.B. abgeschnittener Bon) und 7/19 % passt
     for r in rows:
