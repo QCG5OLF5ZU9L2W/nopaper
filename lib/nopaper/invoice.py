@@ -286,6 +286,23 @@ def date_variants(d: dt.date) -> list[str]:
 _MONATE = ["jan", "feb", "m", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "dez"]
 
 
+_GEBURT = re.compile(r"(?:\bgeb\b\.?|\bgeb\.|geboren|geburtsdatum|geburtstag|geb\.?\s?-?\s?dat\w*|\*)\s*(?:am|:)?\s*$", re.I)
+
+
+def datum_ist_geburtsdatum(d: dt.date, text: str) -> bool:
+    """True, wenn das Datum im Text steht und an JEDER Stelle als Geburtsdatum bezeichnet ist
+    ("geb. 25.08.1983", "geboren am", "Geburtsdatum:", "*25.08.1983"). Ein solches Datum ist nie das
+    Rechnungsdatum – und als Angabe zur behandelten Person hat es in den Feldern nichts zu suchen."""
+    stellen = []
+    for v in sorted(set(date_variants(d)), key=len, reverse=True):
+        for m in re.finditer(r"(?<!\d)" + re.escape(v).replace(r"\ ", r"\s?") + r"(?!\d)", text):
+            if not any(a <= m.start() < b for a, b in stellen):
+                stellen.append((m.start(), m.end()))
+    if not stellen:
+        return False
+    return all(_GEBURT.search(text[max(0, a - 30):a]) for a, _ in stellen)
+
+
 def datum_im_text(d: dt.date, text: str) -> bool:
     flat = re.sub(r"\s+", "", text)
     if any(v.replace(" ", "") in flat for v in date_variants(d)):
@@ -726,6 +743,10 @@ def complete_vat(inv: dict, text: str | None = None) -> list[str]:
         else:
             inv["invoice_number"] = None
             notes.append("RECHNUNGSNUMMER_VERWORFEN")
+    # f2) "Rechnungsdatum", das im Text nur als Geburtsdatum steht: verwerfen (E66)
+    if text and inv.get("issue_date") and datum_ist_geburtsdatum(inv["issue_date"], text):
+        inv["issue_date"] = None
+        notes.append("RECHNUNGSDATUM_VERWORFEN")
     # g) Steuernummer mit falschem Format (z.B. IK-Nummer, Kassennummer) verwerfen
     tn = inv["seller"].get("tax_number")
     if tn and not steuernummer_ok(tn) and ist_inland_eu(inv):
