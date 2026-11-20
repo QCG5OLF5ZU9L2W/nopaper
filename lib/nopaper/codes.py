@@ -67,6 +67,15 @@ def aus_zbar_xml(xml: str) -> list[Code]:
     return out
 
 
+def _seitenbilder(original: Path, ziel: Path, seiten: int, dpi: int, timeout: int, png: bool) -> list[Path]:
+    """Graustufenbilder der ersten Seiten. Ohne `png` als PGM: unkomprimiert und damit um ein Mehrfaches
+    schneller geschrieben und gelesen – die Kompression war der groesste Posten beim Lesen der Codes (E80)."""
+    cmd = ["pdftoppm", "-r", str(dpi), "-gray", *(["-png"] if png else []), "-f", "1", "-l", str(seiten),
+           str(original), str(ziel / "s")]
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+    return sorted(ziel.glob("s*.png" if png else "s*.pgm")) if r.returncode == 0 else []
+
+
 def lesen(original: Path, workdir: Path, seiten: int = 3, dpi: int = 300, timeout: int = 120) -> list[Code]:
     """Codes der ersten `seiten` Seiten. Leere Liste, wenn nichts gefunden wird oder der Leser fehlt –
     das Lesen von Codes darf die Verarbeitung nie aufhalten."""
@@ -75,15 +84,18 @@ def lesen(original: Path, workdir: Path, seiten: int = 3, dpi: int = 300, timeou
     ziel = workdir / "codes"
     ziel.mkdir(parents=True, exist_ok=True)
     try:
-        r = subprocess.run(["pdftoppm", "-r", str(dpi), "-gray", "-png", "-f", "1", "-l", str(seiten),
-                            str(original), str(ziel / "s")], capture_output=True, timeout=timeout, check=False)
-        bilder = sorted(ziel.glob("s*.png"))
-        if r.returncode != 0 or not bilder:
-            return []
-        # Rueckgabewert 4 heisst nur "kein Code gefunden"; die XML-Ausgabe kommt trotzdem
-        z = subprocess.run(["zbarimg", "--quiet", "--xml", *map(str, bilder)], capture_output=True,
-                           timeout=timeout, check=False)
-        return aus_zbar_xml(z.stdout.decode("utf-8", errors="replace"))
+        for png in (False, True):       # erst das schnelle Format; PNG nur, falls zbarimg es nicht lesen kann
+            bilder = _seitenbilder(original, ziel, seiten, dpi, timeout, png)
+            if not bilder:
+                continue
+            # Rueckgabewert 4 heisst nur "kein Code gefunden"; die XML-Ausgabe kommt trotzdem
+            z = subprocess.run(["zbarimg", "--quiet", "--xml", *map(str, bilder)], capture_output=True,
+                               timeout=timeout, check=False)
+            if z.returncode in (0, 4):
+                return aus_zbar_xml(z.stdout.decode("utf-8", errors="replace"))
+            for b in bilder:
+                b.unlink(missing_ok=True)
+        return []
     except (subprocess.TimeoutExpired, OSError):
         return []
     finally:

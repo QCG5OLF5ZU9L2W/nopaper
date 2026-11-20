@@ -1247,6 +1247,47 @@ class NopaperTest(unittest.TestCase):
         (self.tmp / "config.json").write_text(json.dumps(d))
         self.assertEqual(config.load(self.tmp / "config.json").vorlauf, 1)
 
+    @unittest.skipUnless(shutil.which("pdftoppm"), "pdftoppm fehlt")
+    def test_codes_schnelles_bildformat_mit_rueckfall(self):
+        from nopaper import codes
+        # kleinste gueltige PDF mit einer leeren Seite
+        teile = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                 b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>"]
+        pdf, stellen = b"%PDF-1.4\n", []
+        for i, t in enumerate(teile, 1):
+            stellen.append(len(pdf))
+            pdf += b"%d 0 obj\n" % i + t + b"\nendobj\n"
+        xref = len(pdf)
+        pdf += b"xref\n0 4\n0000000000 65535 f \n" + b"".join(b"%010d 00000 n \n" % o for o in stellen)
+        pdf += b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % xref
+        original = self.tmp / "muster.pdf"
+        original.write_bytes(pdf)
+        xml = ("<barcodes xmlns='http://zbar.sourceforge.net/2008/barcode'><source href='x'><index num='0'>"
+               "<symbol type='CODE-128'><data>MUSTER-1</data></symbol></index></source></barcodes>")
+        werkzeuge = self.tmp / "bin"
+        werkzeuge.mkdir()
+        spur = self.tmp / "zbar.spur"
+
+        def zbar(skript: str) -> None:
+            (werkzeuge / "zbarimg").write_text("#!/bin/sh\necho \"$@\" >> %s\n%s" % (spur, skript))
+            (werkzeuge / "zbarimg").chmod(0o755)
+
+        alt = os.environ["PATH"]
+        os.environ["PATH"] = f"{werkzeuge}:{alt}"
+        try:
+            zbar(f"echo \"{xml}\"\n")
+            self.assertEqual([c.inhalt for c in codes.lesen(original, self.tmp / "w1")], ["MUSTER-1"])
+            self.assertIn(".pgm", spur.read_text())
+            self.assertNotIn(".png", spur.read_text())              # das schnelle Format reicht
+            spur.unlink()
+            # ein zbarimg, das PGM nicht lesen kann: zweiter Versuch mit PNG
+            zbar(f"case \"$*\" in *.pgm*) exit 1;; esac\necho \"{xml}\"\n")
+            self.assertEqual([c.inhalt for c in codes.lesen(original, self.tmp / "w2")], ["MUSTER-1"])
+            self.assertIn(".png", spur.read_text())
+        finally:
+            os.environ["PATH"] = alt
+        self.assertFalse((self.tmp / "w1" / "codes").exists())
+
     def test_stoppuhr(self):
         from nopaper.pipeline import Stoppuhr
         u = Stoppuhr(vorlauf=4.2)
