@@ -2,6 +2,16 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.0
+
+- **Rechnungspositionen im Sidecar** (E72, ändert E13): Mit `"positionen": true` in der Konfiguration liest nopaper bei Rechnungen, Gutschriften und Kassenbons die Positionen und schreibt sie in den Sidecar: Artikelnummer des Lieferanten, Bezeichnung, Menge, Einheit, Einzelpreis, Zeilenbetrag, Steuersatz und – wenn es dasteht – den Inhalt der Einheit („100 Stück“). **Standard ist aus.**
+  - Geprüft wird mit festen Regeln: Jeder Zeilenbetrag steht wörtlich im Text, Menge × Einzelpreis ergibt den Zeilenbetrag, die Summe der Zeilen trifft das Netto oder das Brutto der Rechnung. Das Ergebnis steht im Herkunftsnachweis als `positionen-status=belegt` oder `abweichend`.
+  - Die Positionen ändern weder die Kopfdaten noch den Prüfstatus des Belegs.
+  - Zahlen stehen mit der gedruckten Genauigkeit im Sidecar (bis vier Nachkommastellen), nichts wird gerundet oder umgerechnet.
+  - Ein Sidecar mit Positionen trägt das Profil Factur-X BASIC statt BASIC WL; die Kennung bleibt `SCAN-SIDECAR/1.1`.
+- **Datenschutz beachten:** Positionen können Angaben nach Art. 9 DSGVO enthalten (etwa Laborleistungen zu einer Person). Deshalb ist die Funktion abgeschaltet, bis der Verantwortliche sie einschaltet.
+- Nur mit Offline-Tests an Musterdaten geprüft; an echten Rechnungen und mit dem Leser in kumero noch nicht gelaufen.
+
 ## 1.8.7
 
 - **Fortschritt im Protokoll:** Für jedes Dokument, das über einen Auslöser-Tag läuft, schreibt nopaper jetzt eine Zeile je Schritt (beginnt, Text erkannt, ausgelesen, Volltext-Weg) statt nur einer Zeile am Ende. Wie bisher nur Kennzahlen: Dokumentnummer, Zeichenzahl, Kategorie, Dauer.

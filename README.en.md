@@ -289,6 +289,35 @@ Detection uses fixed rules, no language model: only a date that stands next to "
 
 The field is a working aid and does not replace deadline control: if text recognition misreads a digit, the wrong day ends up in the field. The summons itself is authoritative.
 
+## Invoice line items for an inventory system
+
+By default nopaper reads only the header data of an invoice. With
+
+```json
+"positionen": true
+```
+
+at the top level of the configuration it also reads the line items of invoices, credit notes and till receipts and writes them into the sidecar on the document.
+
+| Data | In the sidecar (per `IncludedSupplyChainTradeLineItem`) |
+|---|---|
+| Supplier's article number | `SpecifiedTradeProduct/SellerAssignedID` |
+| Description | `SpecifiedTradeProduct/Name` |
+| Quantity | `BilledQuantity` (`unitCode` is the unit as a code of the standard) |
+| Unit price | `NetPriceProductTradePrice/ChargeAmount`, for gross prices `GrossPriceProductTradePrice` |
+| Line amount | `SpecifiedTradeSettlementLineMonetarySummation/LineTotalAmount` |
+| Tax rate | `ApplicableTradeTax/RateApplicablePercent` |
+| Line number, unit and content of the unit as printed | line note: `pos=…`, `einheit=Packung`, `inhalt=100 Stück` |
+
+Whether the line items are correct is stated in the provenance note of the sidecar:
+
+- `positionen-status=belegt`: every line amount is in the text, every line adds up, and the sum matches the net (`positionen-preise=netto`) or gross (`brutto`) total of the invoice.
+- `positionen-status=abweichend`: the line items are in the sidecar anyway but are not confirmed. The reason is in `pruefhinweise`.
+
+Line items change neither the header data nor the review status of the document. nopaper converts no units and maps no articles; that is the inventory system's job.
+
+**Data protection:** line items can contain data about persons, e.g. laboratory services. The feature is therefore off until it is switched on deliberately.
+
 ## File numbers as tags
 
 If file numbers exist in paperless as tags, nopaper assigns them. Add this under `tags` in the configuration:

@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import VERSION, codes as qr, invoice, llm, ocr, termin
+from . import VERSION, codes as qr, invoice, llm, ocr, positionen, termin
 from .config import FELD_TYPEN, Config
 from .kumero import Kumero
 from .paperless import Paperless, PaperlessFehler, Voruebergehend
@@ -420,9 +420,26 @@ class Nopaper:
             "extraktion-zeit": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
             "pruefstatus": status,
             "pruefhinweise": ",".join(issues + notes),
+            # Positionen (E72): nur 'belegt' ist rechnerisch gegen die Rechnungssumme geprueft
+            "positionen-status": inv.get("positionen_status"),
+            "positionen-anzahl": len(inv["positionen"]) if inv.get("positionen") else None,
+            "positionen-preise": inv.get("positionen_preise"),
             "hinweis": SIDECAR_HINWEIS,
         }
         return invoice.build_cii(inv, prov)
+
+    def _positionen(self, doc_id: int, inv: dict, roh: str) -> list[str]:
+        """Rechnungspositionen lesen und pruefen (E72). Eine Zugabe: Sie aendert weder Kopfdaten noch
+        Pruefstatus; die Codes sind Hinweise. Protokolliert wird nur die Anzahl."""
+        if not self.cfg.positionen or inv["kategorie"] not in positionen.KATEGORIEN:
+            return []
+        t = time.monotonic()
+        pos = positionen.lesen(self.ki, self.cfg.modell_text, roh)
+        status, preise, codes = positionen.pruefen(pos, inv, roh)
+        if pos:
+            inv["positionen"], inv["positionen_status"], inv["positionen_preise"] = pos, status, preise
+        log.info("doc=%s positionen gelesen: %d, %s (%.0fs)", doc_id, len(pos), status, time.monotonic() - t)
+        return codes
 
     def _code_felder(self, gelesen: list) -> dict[int, object]:
         """Strich- und QR-Codes fuer die eingerichteten Felder (E67). Ein kurzes Textfeld fasst in paperless
@@ -612,6 +629,7 @@ class Nopaper:
                 return "keine_rechnung"
             log.info("doc=%s ausgelesen als %s (%.0fs): text glaetten, codes lesen, in paperless schreiben", doc_id,
                      kat or "-", time.monotonic() - t0)
+            notes = notes + self._positionen(doc_id, inv, roh)
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
             gelesen = self.codes_lesen(original, workdir)
             girocode_anwenden(inv, issues, notes, qr.erster_girocode(gelesen))

@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 GUIDELINE_ID = "urn:factur-x.eu:1p0:basicwl"
+GUIDELINE_ID_POSITIONEN = "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"   # mit Positionen (E72)
 SIDECAR_KENNUNG = "SCAN-SIDECAR/1.1"
 
 # --------------------------------------------------------------------------- Hilfsfunktionen
@@ -944,11 +945,53 @@ def _date(parent, tag, d: dt.date):
     _sub(_sub(parent, tag), "udt:DateTimeString", d.strftime("%Y%m%d"), format="102")
 
 
+def _positionen_xml(tx, inv: dict, positionen: list[dict]) -> None:
+    """Positionen so, wie sie gedruckt sind (E72). Betraege mit der gedruckten Genauigkeit (2 bis 4
+    Nachkommastellen). Die gedruckte Einheit und der Inhalt der Einheit stehen als schluessel=wert in der
+    Notiz der Zeile; `unitCode` ist nur die Uebersetzung in den Code der Norm (unbekannt: C62)."""
+    from . import positionen as pos_mod
+    brutto = inv.get("positionen_preise") == "brutto"
+    saetze = {r["rate"] for r in inv.get("vat") or []}
+    for i, p in enumerate(positionen, 1):
+        li = _sub(tx, "ram:IncludedSupplyChainTradeLineItem")
+        ld = _sub(li, "ram:AssociatedDocumentLineDocument")
+        _sub(ld, "ram:LineID", str(i))
+        notiz = [f"{k}={v}" for k, v in (("pos", p.get("pos")), ("einheit", p.get("einheit")),
+                                         ("inhalt", p.get("inhalt"))) if v]
+        if notiz:
+            _sub(_sub(ld, "ram:IncludedNote"), "ram:Content", "\n".join(notiz))
+        prod = _sub(li, "ram:SpecifiedTradeProduct")
+        if p.get("artikelnummer"):
+            _sub(prod, "ram:SellerAssignedID", p["artikelnummer"])
+        _sub(prod, "ram:Name", p["bezeichnung"])
+        la = _sub(li, "ram:SpecifiedLineTradeAgreement")
+        if p.get("einzelpreis") is not None:
+            preis = _sub(la, "ram:GrossPriceProductTradePrice" if brutto else "ram:NetPriceProductTradePrice")
+            _sub(preis, "ram:ChargeAmount", pos_mod.dezimal(p["einzelpreis"]))
+        lief = _sub(li, "ram:SpecifiedLineTradeDelivery")
+        if p.get("menge") is not None:
+            _sub(lief, "ram:BilledQuantity", pos_mod.dezimal(p["menge"]).rstrip("0").rstrip(".") or "0",
+                 unitCode=pos_mod.einheit_code(p.get("einheit")))
+        ls = _sub(li, "ram:SpecifiedLineTradeSettlement")
+        satz = p.get("steuersatz")
+        if satz is None and len(saetze) == 1:
+            satz = next(iter(saetze))       # die Rechnung weist nur einen Satz aus
+        if satz is not None:
+            tt = _sub(ls, "ram:ApplicableTradeTax")
+            _sub(tt, "ram:TypeCode", "VAT")
+            _sub(tt, "ram:CategoryCode", "S" if satz > 0 else "E")
+            _sub(tt, "ram:RateApplicablePercent", money(satz))
+        _sub(_sub(ls, "ram:SpecifiedTradeSettlementLineMonetarySummation"), "ram:LineTotalAmount",
+             pos_mod.dezimal(p["gesamtpreis"]))
+
+
 def build_cii(inv: dict, prov: dict) -> bytes:
     root = ET.Element(_q("rsm:CrossIndustryInvoice"))
 
     ctx = _sub(root, "rsm:ExchangedDocumentContext")
-    _sub(_sub(ctx, "ram:GuidelineSpecifiedDocumentContextParameter"), "ram:ID", GUIDELINE_ID)
+    positionen = inv.get("positionen") or []
+    _sub(_sub(ctx, "ram:GuidelineSpecifiedDocumentContextParameter"), "ram:ID",
+         GUIDELINE_ID_POSITIONEN if positionen else GUIDELINE_ID)
 
     doc = _sub(root, "rsm:ExchangedDocument")
     if inv["invoice_number"]:
@@ -961,6 +1004,7 @@ def build_cii(inv: dict, prov: dict) -> bytes:
     _sub(_sub(doc, "ram:IncludedNote"), "ram:Content", "\n".join(note_lines))
 
     tx = _sub(root, "rsm:SupplyChainTradeTransaction")
+    _positionen_xml(tx, inv, positionen)
 
     agr = _sub(tx, "ram:ApplicableHeaderTradeAgreement")
     if inv["buyer_reference"]:

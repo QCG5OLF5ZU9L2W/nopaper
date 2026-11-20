@@ -89,6 +89,7 @@ class Config:
     test: Path = Path("/srv/nopaper/test")
     betriebsart: str = "scanner"           # scanner (bisher) | paperless (E61: erst paperless, zustandslos)
     dokumentdatum_setzen: bool = True      # nur Betriebsart paperless: "Erstellt am" = Rechnungsdatum (E66)
+    positionen: bool = False               # E72: Rechnungspositionen lesen und in den Sidecar schreiben
 
     @property
     def zustandslos(self) -> bool:
@@ -156,6 +157,8 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
     if ca and not testlauf and not Path(ca).is_file():
         raise ConfigError(f"paperless.ca_datei {ca} nicht gefunden")
 
+    if not isinstance(d.get("positionen", False), bool):
+        raise ConfigError("positionen muss true oder false sein")
     tags = _req(d, "tags")
     if not isinstance(tags.get("aktenzeichen", False), bool):
         raise ConfigError("tags.aktenzeichen muss true oder false sein")
@@ -229,6 +232,7 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         kategorie_tags=kategorie_tags,
         betriebsart=betriebsart,
         dokumentdatum_setzen=bool(d.get("dokumentdatum_setzen", True)),
+        positionen=d.get("positionen", False),
     )
     if not testlauf and (not cfg.empfaenger or cfg.empfaenger.lower().startswith("muster")):
         raise ConfigError("empfaenger ist noch der Platzhalter – bitte den Namen der eigenen Organisation eintragen")
