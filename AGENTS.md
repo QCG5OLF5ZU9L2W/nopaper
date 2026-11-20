@@ -383,6 +383,15 @@ Ergebnis: NuExtract im Bild-Modus ist gleichauf mit qwen, mit den Korrekturen au
     j. **Negative Beträge** (E60): ob paperless und kumero sie in den Feldern annehmen, ist nicht am Echtsystem bestätigt.
     k. **Patientenzuordnung gescannter Schreiben** – eigenes Vorhaben außerhalb von nopaper; offen sind Praxissoftware, Zugriff auf den Patientenstamm und der Ablageweg.
 
+17. **Rechnungspositionen für die Warenwirtschaft in kumero (Vorschlag vom 2026-11-20, nicht entschieden, nicht gebaut).** Ziel des Verantwortlichen: permanente Inventur zur Optimierung der Beschaffung; die Warenwirtschaft in kumero entsteht erst.
+    a. **Aufteilung:** nopaper liest und prüft, kumero entscheidet. nopaper liefert die Positionen so, wie sie gedruckt sind (E38); Artikelstamm, Zuordnung „Lieferant + Artikelnummer → eigener Artikel“, Bestandseinheit und die Frage, was überhaupt Bestand ist, liegen in kumero.
+    b. **Weg:** derselbe Sidecar im Feld am Dokument (E61), künftig mit Positionen. Das heutige Profil BASIC WL hat keine; nötig ist Factur-X BASIC oder EN 16931 (`IncludedSupplyChainTradeLineItem`). Der Sidecar bleibt eine Buchungshilfe und keine E-Rechnung.
+    c. **Je Position:** Positionsnummer, Artikelnummer des Lieferanten, Bezeichnung, Menge und Einheit wie gedruckt, Einzelpreis, Gesamtpreis netto, Steuersatz soweit ausgewiesen, Inhalt der Einheit nur, wenn er im Text steht (z. B. „1 Packung = 100 Stück“).
+    d. **Prüfung mit festen Regeln:** Menge × Einzelpreis = Gesamtpreis je Position, Summe der Positionen = Netto der Rechnung. Geht es nicht auf, bekommt der Beleg einen Prüfhinweis; die Kopfdaten bleiben davon unberührt.
+    e. **Schwierig:** Umrechnung der Einheiten, lange und gescannte Rechnungen (seitenweise lesen, Summenprobe über alle Seiten), Rabatte und Zuschläge je Position, Pfand, Gutschriften und Teillieferungen.
+    f. **Stand in kumero (gelesen am 2026-11-20, Version 0.7.26):** Eine Warenwirtschaft ist dort weder beschrieben noch gebaut. Der Leser für E-Rechnungen im Modul `import` (`Rechnung.php`) zählt die Positionen nur und merkt sich bis zu fünf Bezeichnungen; Menge, Preis und Artikelnummer liest er nicht. Das Modul `nopaper` und die Annahme des Sidecars sind dort seit dem 2026-11-18 zurückgestellt; die Dokumente dort beschreiben noch die Einlieferung per Aufruf (E56) und kennen E61 (Sidecar im Feld in paperless) nicht.
+    g. **Reihenfolge:** erst die Abholung des Sidecars durch kumero (16 b) und das Buchen daraus, dann die Positionen. Vorher zu entscheiden: ob der Zugang nach Rechnung oder nach Lieferschein gebucht wird, und mit welchen drei bis fünf Lieferanten begonnen wird.
+
 ## 13. Aufbau des Codes (Version 1.8.7)
 
 | Datei | Inhalt |

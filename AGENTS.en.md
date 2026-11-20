@@ -331,6 +331,15 @@ Result: NuExtract in image mode is on a par with qwen, and probably better with 
     j. **Negative amounts** (E60): whether paperless and kumero accept them in the fields has not been confirmed on the real system.
     k. **Assigning scanned letters to patients** – a separate undertaking outside nopaper; open are the practice software, access to the patient master data and the filing path.
 
+17. **Invoice line items for the inventory system in kumero (proposal of 2026-11-20, not decided, not built).** The controller's goal: perpetual inventory to optimise procurement; the inventory system in kumero is only now being created.
+    a. **Division of labour:** nopaper reads and checks, kumero decides. nopaper delivers the line items as printed (E38); article master data, the mapping "supplier + article number → own article", the stock unit and the question of what counts as stock at all belong in kumero.
+    b. **Path:** the same sidecar in the field on the document (E61), in future with line items. Today's profile BASIC WL has none; Factur-X BASIC or EN 16931 is needed (`IncludedSupplyChainTradeLineItem`). The sidecar remains a booking aid, not an e-invoice.
+    c. **Per line:** line number, the supplier's article number, description, quantity and unit as printed, unit price, net line total, tax rate where shown, content of the unit only if it is in the text (e.g. "1 Packung = 100 Stück").
+    d. **Check with fixed rules:** quantity × unit price = line total, sum of lines = net total of the invoice. If it does not add up, the document gets a review note; the header data stay untouched.
+    e. **Hard parts:** unit conversion, long and scanned invoices (read page by page, check the sum across all pages), discounts and surcharges per line, deposits, credit notes and partial deliveries.
+    f. **State of kumero (read on 2026-11-20, version 0.7.26):** an inventory system is neither described nor built there. The e-invoice reader in module `import` (`Rechnung.php`) only counts line items and keeps up to five descriptions; it reads no quantity, price or article number. The module `nopaper` and the reception of the sidecar have been postponed there since 2026-11-18; the documents there still describe delivery by call (E56) and do not know E61 (sidecar in the paperless field).
+    g. **Order:** first kumero's pickup of the sidecar (16 b) and booking from it, then the line items. To be decided before: whether stock receipt follows the invoice or the delivery note, and which three to five suppliers to start with.
+
 ## 13. Code layout (version 1.8.7)
 
 | File | Content |
