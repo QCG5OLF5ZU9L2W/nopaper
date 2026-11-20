@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.1
+
+- **Lastschrift** (E73): Eine Mandatsreferenz oder Gläubiger-ID landet nicht mehr im Verwendungszweck (`VERWENDUNGSZWECK_IST_MANDAT`). Sagt der Beleg, dass der Betrag abgebucht oder eingezogen wird, steht `ZAHLUNG_PER_LASTSCHRIFT` in den Hinweisen und im Sidecar die Zahlungsart Lastschrift (Code 59 statt 58). Anlass: Telefonrechnung, bei der die Mandatsreferenz als Verwendungszweck im Feld stand.
+
 ## 1.9.0
 
 - **Rechnungspositionen im Sidecar** (E72, ändert E13): Mit `"positionen": true` in der Konfiguration liest nopaper bei Rechnungen, Gutschriften und Kassenbons die Positionen und schreibt sie in den Sidecar: Artikelnummer des Lieferanten, Bezeichnung, Menge, Einheit, Einzelpreis, Zeilenbetrag, Steuersatz und – wenn es dasteht – den Inhalt der Einheit („100 Stück“). **Standard ist aus.**

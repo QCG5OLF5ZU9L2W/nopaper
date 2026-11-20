@@ -317,7 +317,8 @@ Versicherungsteuer ist keine Umsatzsteuer: tax_total 0, rate 0. Porto, Versand u
 weist der Beleg keine Umsatzsteuer aus, ist tax_total 0 und net_total = gross_total. prepaid = bereits bezahlt (bar, Karte, PayPal),
 hoechstens der Endbetrag; bei "gegeben"/"Rueckgeld" ist amount_due 0.
 payment.reference = was bei der Ueberweisung als Verwendungszweck anzugeben ist (Kassenzeichen, Aktenzeichen,
-Vertrags-, Kunden- oder Rechnungsnummer laut Zahlungshinweis), genau wie gedruckt.
+Vertrags-, Kunden- oder Rechnungsnummer laut Zahlungshinweis), genau wie gedruckt. Mandatsreferenz und
+Glaeubiger-ID sind kein Verwendungszweck; wird per Lastschrift abgebucht, ist payment.reference null.
 due_days = Zahlungsfrist in Tagen, nur wenn kein Faelligkeitsdatum genannt ist. skonto: je Skontostufe Prozentsatz,
 Frist in Tagen oder Datum, Skontobetrag nur wenn ausgewiesen; ohne Skonto leer.
 Keine Positionen, Diagnosen, Patienten- oder Personendaten uebernehmen."""

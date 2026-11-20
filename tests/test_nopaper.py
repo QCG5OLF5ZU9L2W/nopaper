@@ -2011,6 +2011,30 @@ class RegelTest(unittest.TestCase):
         self.assertIsNone(i["payment_reference"])
         self.assertIsNone(invoice.kassenzeichen_im_text("Kassenzeichen 12345678\nKassenzeichen 87654321"))
 
+    def test_lastschrift_und_mandatsreferenz(self):
+        text = ("Rechnungsbetrag 119,00 EUR\nDen Betrag von 119,00 EUR buchen wir am 08.09.2026 ab.\n"
+                "Wir beziehen uns auf die Mandatsreferenz DE0001000000000012345.\nBuchungskonto 123 456 7890")
+        i = self.inv(raw={"payment": {"iban": None, "bic": None, "reference": "DE0001000000000012345"}})
+        notes = invoice.complete_vat(i, text)
+        self.assertIn("VERWENDUNGSZWECK_IST_MANDAT", notes)
+        self.assertIn("ZAHLUNG_PER_LASTSCHRIFT", notes)
+        self.assertIsNone(i["payment_reference"])
+        self.assertTrue(i["lastschrift"])
+        self.assertIn(b"<ram:TypeCode>59</ram:TypeCode>", invoice.build_cii(i, {}))
+        # eine Nummer, die auch als Verwendungszweck bezeichnet ist, bleibt
+        i = self.inv(raw={"payment": {"iban": None, "bic": None, "reference": "123 456 7890"}})
+        invoice.complete_vat(i, text)
+        self.assertEqual(i["payment_reference"], "123 456 7890")
+        # das blosse Angebot einer Lastschrift ist keine Abbuchung
+        f = invoice.lastschrift_im_text
+        self.assertFalse(f("Zahlen Sie bequem per Lastschrift. Mandatsreferenz: ________\nBitte ueberweisen Sie 10,00"))
+        self.assertTrue(f("Der Betrag wird am 01.12.2026 von Ihrem Konto abgebucht."))
+        self.assertTrue(f("Den Rechnungsbetrag ziehen wir in den naechsten Tagen per Lastschrift ein."))
+        i = self.inv(raw={})
+        invoice.complete_vat(i, "Bitte ueberweisen Sie den Betrag bis 01.12.2026.")
+        self.assertFalse(i.get("lastschrift"))
+        self.assertNotIn(b"<ram:TypeCode>59", invoice.build_cii(i, {}))
+
     def test_rechnungsnummer_bezeichnung(self):
         text = "Rechnungsnummer   1000051858\n   Kundennummer:   39386258\nRe-Nr.: RE2026-127426 (Auftrag-Nr.: AU199491)"
         self.assertTrue(invoice.nummer_bezeichnung_falsch("39386258", text))

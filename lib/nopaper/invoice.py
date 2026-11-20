@@ -220,6 +220,8 @@ Regeln fuer die Rechnungsdaten:
 - Kassenbons: invoice_number = Bon-, Beleg- oder Rechnungsnummer, falls vorhanden - NICHT Steuernummer,
   Kassen-, Terminal-, Transaktions- oder Filialnummer; bezahlter Betrag in prepaid.
   "gegeben"/"Rueckgeld": prepaid ist hoechstens der Endbetrag, amount_due dann 0.
+- payment.reference: nur, was bei einer Ueberweisung anzugeben ist. Mandatsreferenz und Glaeubiger-ID sind KEIN
+  Verwendungszweck; wird der Betrag per Lastschrift abgebucht, ist reference null.
 - payment_terms: due_days = Zahlungsfrist in Tagen ("zahlbar innerhalb 14 Tagen"), wenn kein Datum genannt ist.
   skonto: eine Zeile je Skontostufe ("2 % Skonto bei Zahlung innerhalb 10 Tagen" -> percent 2, days 10);
   until nur bei genanntem Datum, amount nur bei ausgewiesenem Skontobetrag. Kein Skonto: [].
@@ -773,6 +775,14 @@ def complete_vat(inv: dict, text: str | None = None) -> list[str]:
         if ref and re.sub(r"\s+", "", ref).upper() not in kompakt:
             inv["payment_reference"] = ref = None
             notes.append("VERWENDUNGSZWECK_VERWORFEN")
+        # h4) Lastschrift (E73): Eine Mandatsreferenz ist kein Verwendungszweck. Wird abgebucht, ist nichts
+        #     zu ueberweisen – das steht als Hinweis da und im Sidecar als Zahlungsart.
+        if ref and ist_mandatsreferenz(ref, text):
+            inv["payment_reference"] = ref = None
+            notes.append("VERWENDUNGSZWECK_IST_MANDAT")
+        if lastschrift_im_text(text):
+            inv["lastschrift"] = True
+            notes.append("ZAHLUNG_PER_LASTSCHRIFT")
         if not ref:
             kz = kassenzeichen_im_text(text)
             if kz:
@@ -809,6 +819,30 @@ _BEZAHLT = re.compile(r"zahlung\s+erfolgt|bezahlung|bezahlt|betrag\s+erhalten|ge
                       re.I)
 _KASSENZEICHEN = re.compile(r"K\s?A\s?S\s?S\s?E\s?N\s?Z\s?E\s?I\s?C\s?H\s?E\s?N[^0-9A-Za-zÄÖÜäöü]{0,40}"
                             r"(\d[\d ]{6,24}\d)", re.I)
+
+
+_MANDAT = re.compile(r"mandats?\s*-?\s*(?:referenz|nummer|nr\.?|id)|gl(?:ä|ae)ubiger\s*-?\s*(?:id\b|identifikation\w*)",
+                     re.I)
+# Der Beleg sagt selbst, dass abgebucht wird – nicht schon das blosse Angebot einer Lastschrift
+_LASTSCHRIFT = re.compile(
+    r"buchen\s+wir\b.{0,80}?\bab\b|wird\b.{0,60}?\babgebucht|ziehen\s+wir\b.{0,80}?\bein\b|"
+    r"wird\b.{0,60}?\beingezogen|per\s+(?:sepa-?\s?)?lastschrift\s+(?:eingezogen|abgebucht)|"
+    r"(?:mandats?\s*-?\s*referenz)\W{0,5}[0-9A-Z][0-9A-Z\-/]{5,}", re.I | re.S)
+
+
+def lastschrift_im_text(text: str) -> bool:
+    """Sagt der Beleg, dass der Betrag per Lastschrift eingezogen wird? (E73)"""
+    return _LASTSCHRIFT.search(text) is not None
+
+
+def ist_mandatsreferenz(ref: str, text: str) -> bool:
+    """True, wenn der Wert im Text nur als Mandatsreferenz oder Glaeubiger-ID bezeichnet vorkommt (E73)."""
+    n = re.sub(r"\s+", "", ref).upper()
+    if len(n) < 4:
+        return False
+    muster = r"\s*".join(re.escape(c) for c in n)
+    stellen = [m.start() for m in re.finditer(muster, text, re.I)]
+    return bool(stellen) and all(_MANDAT.search(text[max(0, s - 45):s]) for s in stellen)
 
 
 def kassenzeichen_im_text(text: str) -> str | None:
@@ -1039,9 +1073,11 @@ def build_cii(inv: dict, prov: dict) -> bytes:
         _sub(st, "ram:PaymentReference", inv["payment_reference"])
     cur = inv["currency"]
     _sub(st, "ram:InvoiceCurrencyCode", cur)
+    if inv.get("lastschrift") and not inv["iban"]:
+        _sub(_sub(st, "ram:SpecifiedTradeSettlementPaymentMeans"), "ram:TypeCode", "59")  # SEPA-Lastschrift
     if inv["iban"]:
         pm = _sub(st, "ram:SpecifiedTradeSettlementPaymentMeans")
-        _sub(pm, "ram:TypeCode", "58")  # SEPA-Ueberweisung
+        _sub(pm, "ram:TypeCode", "59" if inv.get("lastschrift") else "58")  # SEPA-Lastschrift | -Ueberweisung
         _sub(_sub(pm, "ram:PayeePartyCreditorFinancialAccount"), "ram:IBANID", inv["iban"])
         if inv["bic"]:
             _sub(_sub(pm, "ram:PayeeSpecifiedCreditorFinancialInstitution"), "ram:BICID", inv["bic"])
