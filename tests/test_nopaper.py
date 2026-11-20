@@ -51,6 +51,13 @@ POSITIONEN = [
      "inhalt": None, "einzelpreis": "434,5600", "gesamtpreis": "434,5600", "steuersatz": None},
 ]
 
+ZBERICHT_TEXT = """Musterpay Limited                                   19.11.2026
+Zahlungsbericht
+Kundennummer: MUSTER1    Berichtszeitraum: 18-11-2026
+Verarbeitete Kartenzahlungen  €295.36   Bearbeitungsgebuehren  €3.33   Abzuege  €0.00
+Ausgezahlter Betrag  €237.03   Auszuzahlen  €55.00
+"""
+
 MAHNUNG_TEXT = """Musterkasse des Landes                 Datum: 04.03.2026
 Bankverbindung: IBAN: DE89 3704 0044 0532 0130 00
 Kassenzeichen:  0912340001234
@@ -100,7 +107,7 @@ FELDER = {"Erkannt: Rechnungsnummer": "string", "Erkannt: Rechnungsdatum": "date
           "Erkannt: Steuer_Low": "monetary", "Erkannt: Zahlbetrag": "monetary", "Erkannt: Skonto": "string",
           "IBAN": "string", "Erkannt: Belegart": "string", "Erkannt: Verwendungszweck": "string",
           "Erkannt: Sidecar": "longtext", "Erkannt: Termin": "date", "Erkannt: Terminzeit": "string",
-          "Erkannt: Aktenzeichen": "string", "Erkannt: Barcode": "string", "Erkannt: QR-Code": "longtext"}
+          "Erkannt: Gebühren": "monetary", "Erkannt: Aktenzeichen": "string", "Erkannt: Barcode": "string", "Erkannt: QR-Code": "longtext"}
 
 
 class Welt:
@@ -113,6 +120,7 @@ class Welt:
         self.dateinamen = []
         self.einordnung = "rechnung"
         self.positionen = []
+        self.zahlungsbericht = {}
         self.kontexte = []
         self.extraktion = LLM_RECHNUNG
         self.bild_extraktion = None
@@ -291,7 +299,9 @@ class Handler(BaseHTTPRequestHandler):
         user = req["messages"][1]["content"]
         W.llm_calls.append((req["model"], system[:20], bool(req["messages"][1].get("images"))))
         W.kontexte.append((req["model"], system[:14], req["options"]["num_ctx"]))
-        if system.startswith("Du liest die Positionen"):
+        if system.startswith("Du liest die Summen"):
+            ans = W.zahlungsbericht
+        elif system.startswith("Du liest die Positionen"):
             ans = {"positionen": W.positionen}
         elif system.startswith("Du korrigierst"):
             t = user.replace("Rechnuug", "Rechnung").replace("Herreu", "Herren")
@@ -314,6 +324,8 @@ def fake_ocr(original: Path, workdir: Path, sprache: str = "deu") -> str:
         return LADUNG_TEXT
     if b"MAHNUNG" in data:
         return MAHNUNG_TEXT
+    if b"ZBERICHT" in data:
+        return ZBERICHT_TEXT
     if b"POSRECHNUNG" in data:
         return RECHNUNG_TEXT + POSITIONEN_TEXT
     if b"HANDNR" in data:
@@ -1182,6 +1194,56 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(np.nachbearbeitung_abfragen(), 0)        # voruebergehend: Runde endet, nichts geht verloren
         self.assertTrue(all(5 in W.docs[i]["tags"] for i in (95, 96, 97)))
         self.assertFalse(list(self.cfg.arbeit.glob(".tmp-*")))
+
+    # ------------------------------------------------------------------ Zahlungsbericht (E82)
+    def zbericht_vorbereiten(self, einordnung="zahlungsbericht", **summen):
+        d = json.loads((self.tmp / "config.json").read_text())
+        d.setdefault("kategorie_tags", {})["zahlungsbericht"] = ["Zahlungsbericht"]
+        d["felder"]["gebuehren"] = "Erkannt: Gebühren"
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        W.tags[max(W.tags) + 1] = "Zahlungsbericht"
+        np = self.paperless_zuerst()
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e.update(invoice_number=None, issue_date="2026-11-19", due_date=None)
+        e["seller"] = dict(e["seller"], name="Musterpay Limited", tax_number=None)
+        e["payment"] = {"iban": None, "bic": None, "reference": None}
+        e["totals"] = {"net_total": 0, "tax_total": None, "gross_total": 0, "prepaid": None, "amount_due": 0}
+        e["vat_breakdown"] = []
+        W.extraktion, W.einordnung = e, einordnung
+        W.zahlungsbericht = dict({"verarbeitet": "€295.36", "gebuehren": "€3.33", "abzuege": "€0.00",
+                                  "ausgezahlt": "€237.03", "offen": "€55.00"}, **summen)
+        W.docs[110] = {"id": 110, "content": "x", "title": "Scan_9", "tags": [5], "custom_fields": [], "owner": None,
+                       "original": b"%PDF ZBERICHT 1", "archive": b"A"}
+        return np
+
+    def test_zahlungsbericht_felder_ohne_sidecar(self):
+        for einordnung in ("zahlungsbericht", "gutschrift", "sonstiges"):   # auch wenn das Modell falsch einordnet
+            with self.subTest(einordnung=einordnung):
+                W.reset()
+                np = self.zbericht_vorbereiten(einordnung)
+                np.ein_durchlauf()
+                self.assertEqual(self.tagnamen(110), {"Zahlungsbericht"})           # keine Rechnungs-Tags, kein Pruef-Tag
+                self.assertEqual(self.feld(110, "Erkannt: Belegart"), "zahlungsbericht")
+                self.assertEqual(self.feld(110, "Erkannt: Betrag brutto"), "EUR295.36")
+                self.assertEqual(self.feld(110, "Erkannt: Gebühren"), "EUR3.33")
+                self.assertEqual(self.feld(110, "Erkannt: Zahlbetrag"), "EUR237.03")
+                self.assertEqual(self.feld(110, "Erkannt: Rechnungssteller"), "Musterpay Limited")
+                self.assertIsNone(self.feld(110, "Erkannt: Betrag netto"))
+                self.assertIsNone(self.feld(110, "Erkannt: Sidecar"))
+                self.assertEqual(W.docs[110]["title"], "2026-11-19 Musterpay Limited Zahlungsbericht 237,03 EUR")
+
+    def test_zahlungsbericht_nur_belegte_werte(self):
+        np = self.zbericht_vorbereiten(ausgezahlt="€999.99")            # steht nicht im Text
+        np.ein_durchlauf()
+        self.assertIsNone(self.feld(110, "Erkannt: Zahlbetrag"))
+        self.assertEqual(self.feld(110, "Erkannt: Betrag brutto"), "EUR295.36")
+        self.assertNotIn("nopaper prüfen", self.tagnamen(110))           # reine Information: kein Pruef-Tag
+        self.assertEqual(W.docs[110]["title"], "2026-11-19 Musterpay Limited Zahlungsbericht")
+
+    def test_zahlungsbericht_nichts_gelesen_geht_in_die_pruefung(self):
+        np = self.zbericht_vorbereiten(verarbeitet=None, gebuehren=None, ausgezahlt=None)
+        np.ein_durchlauf()
+        self.assertIn("nopaper prüfen", self.tagnamen(110))
 
     # ------------------------------------------------------------------ Mahnung (E77)
     def mahnung_vorbereiten(self, **totals):

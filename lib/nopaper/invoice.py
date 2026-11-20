@@ -76,7 +76,7 @@ def clean(s) -> str | None:
 
 # Kategorien der Einordnung. Die ersten sechs sind rechnungsartig (Sidecar + Rechnungs-Tags).
 KATEGORIEN_RECHNUNG = ["rechnung", "gutschrift", "kassenbon", "bewirtung", "versicherung", "behoerde"]
-KATEGORIEN_SONST = ["mahnung", "bestellbestaetigung", "buchungsbestaetigung", "lieferschein", "brief", "sonstiges"]
+KATEGORIEN_SONST = ["mahnung", "zahlungsbericht", "bestellbestaetigung", "buchungsbestaetigung", "lieferschein", "brief", "sonstiges"]
 KATEGORIEN = KATEGORIEN_RECHNUNG + KATEGORIEN_SONST
 
 
@@ -183,7 +183,10 @@ kategorie:
 - "rechnung": Rechnung eines Lieferanten oder Dienstleisters (auch Honorar-, Arzt-, Labor-, Software-, Webshop-Rechnung)
 - "gutschrift": Gutschrift oder Rechnungskorrektur zu unseren Gunsten – nur, wenn das Dokument sich selbst so
   nennt. Zahlungs-, Auszahlungs- und Umsatzberichte von Zahlungsdienstleistern (Kartenzahlungen, Gebuehren,
-  ausgezahlter Betrag), Kontoauszuege und Abrechnungsuebersichten sind KEINE Gutschrift, sondern "sonstiges"
+  ausgezahlter Betrag) sind KEINE Gutschrift, sondern "zahlungsbericht"; Kontoauszuege sind "sonstiges"
+- "zahlungsbericht": Zahlungs-, Auszahlungs- oder Umsatzbericht eines Zahlungsdienstleisters oder Kartenterminals
+  (verarbeitete Zahlungen, Gebuehren, ausgezahlter Betrag). Dabei nur seller (der Dienstleister) und issue_date
+  (Datum des Berichts) auslesen; alle Betraege und alles andere null.
 - "kassenbon": Kassenbon/Quittung (Supermarkt, Tankstelle, Post, Kartenzahlungsbeleg mit Warenliste)
 - "bewirtung": Restaurant-/Bewirtungsrechnung
 - "versicherung": Beitragsrechnung einer Versicherung
@@ -850,6 +853,30 @@ def ist_mandatsreferenz(ref: str, text: str) -> bool:
     muster = r"\s*".join(re.escape(c) for c in n)
     stellen = [m.start() for m in re.finditer(muster, text, re.I)]
     return bool(stellen) and all(_MANDAT.search(text[max(0, s - 45):s]) for s in stellen)
+
+
+_ZAHLUNGSBERICHT = re.compile(r"zahlungsbericht|auszahlungsbericht|auszahlungs(?:ü|ue)bersicht|umsatzbericht|"
+                              r"payout\s+report|settlement\s+report|transaktionsbericht", re.I)
+
+
+def ist_zahlungsbericht(text: str) -> bool:
+    """Nennt sich das Dokument am Anfang selbst einen Zahlungsbericht? (E82)"""
+    return _ZAHLUNGSBERICHT.search(text[:1500]) is not None
+
+
+ZAHLUNGSBERICHT_SCHEMA = {
+    "type": "object",
+    "properties": {k: {"type": ["string", "null"]} for k in ("verarbeitet", "gebuehren", "abzuege", "ausgezahlt", "offen")},
+    "required": ["verarbeitet", "gebuehren", "abzuege", "ausgezahlt", "offen"],
+}
+ZAHLUNGSBERICHT_PROMPT = """Du liest die Summen aus dem Zahlungsbericht eines Zahlungsdienstleisters (Text einer
+Texterkennung). Antworte nur mit dem JSON-Schema. Jeden Betrag genau so, wie er gedruckt ist; steht er nicht da: null.
+verarbeitet = Gesamtbetrag der verarbeiteten Zahlungen/Kartenzahlungen vor Gebuehren und Abzuegen (Bruttoumsatz)
+gebuehren = Summe der Gebuehren des Dienstleisters (Bearbeitungs-, Transaktionsgebuehren)
+abzuege = Summe der Abzuege (Rueckerstattungen, Rueckbuchungen), auch wenn 0,00
+ausgezahlt = der auf das Konto ausgezahlte Betrag
+offen = noch auszuzahlender Betrag
+Nur die Summen des Berichts, keine einzelnen Transaktionen. Nichts berechnen."""
 
 
 def kassenzeichen_im_text(text: str) -> str | None:

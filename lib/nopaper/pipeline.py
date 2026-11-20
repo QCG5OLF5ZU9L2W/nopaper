@@ -396,6 +396,7 @@ class Nopaper:
             "netto": inv["net"],
             "steuer": inv["tax"],
             "zahlbetrag": inv["due"],
+            "gebuehren": inv.get("gebuehren"),
             "iban": inv["iban"],
             "verwendungszweck": inv["payment_reference"],
             "pruefstatus": "ok" if status == "ok" else "prüfen",
@@ -665,6 +666,9 @@ class Nopaper:
             kat = inv["kategorie"]
             kein_beleg = not invoice.ist_rechnungsartig(kat)
             ohne_betrag = not kein_beleg and (inv["gross"] is None or inv["gross"] == 0)   # 0,00: E81
+            if not erzwingen and invoice.ist_zahlungsbericht(roh) and (
+                    kein_beleg or ohne_betrag or kat == "gutschrift"):
+                kat, kein_beleg = "zahlungsbericht", True       # nennt sich selbst so (E82)
             if not erzwingen and (kein_beleg or ohne_betrag):
                 # E69: Der Ausloeser gilt fuer jedes Dokument. Was keine Rechnung ist – auch ein Schreiben eines
                 # Gerichts oder einer Behoerde ohne Betrag, etwa eine Ladung – nimmt den Volltext-Weg.
@@ -672,9 +676,13 @@ class Nopaper:
                 pruefen = ohne_betrag and not termin.ist_ladung(roh) and (
                     kat not in ("behoerde", "versicherung") or re.search(r"€|\bEUR\b|\bEuro\b", roh) is not None)
                 log.info("nachbearbeitung doc=%s KEINE_RECHNUNG kategorie=%s -> volltext-weg", doc_id, kat or "-")
-                felder, titel, mcodes = self._mahnung(inv, roh) if kat == "mahnung" else ({}, None, [])
+                felder, titel, mcodes = (self._mahnung(inv, roh) if kat == "mahnung" else
+                                         self._zahlungsbericht(inv, roh) if kat == "zahlungsbericht" else
+                                         ({}, None, []))
+                uhr.runde("zusatz")
                 self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0, v, uhr,
-                                  pruefen=pruefen or "MAHNUNG_BETRAG_NICHT_GELESEN" in mcodes,
+                                  pruefen=(pruefen and kat != "zahlungsbericht") or bool(
+                                      {"MAHNUNG_BETRAG_NICHT_GELESEN", "ZAHLUNGSBERICHT_NICHT_GELESEN"} & set(mcodes)),
                                   vorweg=("KEINE_RECHNUNG", *mcodes), zusatz_felder=felder, titel=titel,
                                   zusatz_tags=self.tag_kategorie.get(kat, []) if kein_beleg else [])
                 return "keine_rechnung"
@@ -783,6 +791,51 @@ class Nopaper:
             doc = self.pl.dokument(doc_id)      # frisch: Tags und Felder koennen sich seit dem Vorlauf geaendert haben
             return self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_text, t0, v,
                                      Stoppuhr(vorlauf=v["dauer"]))
+
+    def _zahlungsbericht(self, inv: dict, roh: str) -> tuple[dict[int, object], str | None, list[str]]:
+        """Summen eines Zahlungsberichts fuer die Felder (E82): verarbeitete Zahlungen -> brutto, Gebuehren ->
+        gebuehren, ausgezahlter Betrag -> zahlbetrag. Ein eigener, kurzer Modellaufruf; uebernommen wird nur, was
+        woertlich im Text steht. Reine Information: keine Rechnungs-Tags, kein Sidecar."""
+        try:
+            raw = self.ki.chat_json(self.cfg.modell_text, invoice.ZAHLUNGSBERICHT_PROMPT, roh[:8000],
+                                    invoice.ZAHLUNGSBERICHT_SCHEMA, num_ctx=min(8192, self.ki.num_ctx))
+        except ValueError:
+            raw = {}
+        flach = invoice._zahl_text(roh)
+        w = {}
+        for k in ("verarbeitet", "gebuehren", "abzuege", "ausgezahlt", "offen"):
+            d = positionen.zahl(raw.get(k)) if isinstance(raw, dict) else None
+            w[k] = d if d is not None and positionen.im_text(d, flach) else None
+        codes = ["ZAHLUNGSBERICHT"]
+        if w["verarbeitet"] is None and w["ausgezahlt"] is None and w["gebuehren"] is None:
+            codes.append("ZAHLUNGSBERICHT_NICHT_GELESEN")
+        elif None not in (w["verarbeitet"], w["gebuehren"], w["ausgezahlt"]):
+            # Probe: verarbeitet - Gebuehren - Abzuege = ausgezahlt + noch auszuzahlen. Nur ein Hinweis – Berichts-
+            # und Auszahlungszeitraum muessen sich nicht decken.
+            links = w["verarbeitet"] - w["gebuehren"] - (w["abzuege"] or 0)
+            rechts = w["ausgezahlt"] + (w["offen"] or 0)
+            codes.append("ZAHLUNGSBERICHT_BELEGT" if abs(links - rechts) <= invoice.TOL
+                         else "ZAHLUNGSBERICHT_SUMME_WEICHT_AB")
+        name = inv["seller"]["name"]
+        if name and invoice.name_im_text(name, roh) < 0.6:
+            name = None
+        datum = inv["issue_date"]
+        if datum and (not invoice.datum_im_text(datum, roh) or invoice.datum_ist_geburtsdatum(datum, roh)):
+            datum = None
+        m = dict(inv, kategorie="zahlungsbericht", invoice_number=None, issue_date=datum, due_date=None,
+                 delivery_date=None, gross=w["verarbeitet"], net=None, tax=None, vat=[], skonto=[],
+                 due=w["ausgezahlt"], gebuehren=w["gebuehren"], iban=None, payment_reference=None,
+                 seller=dict(inv["seller"], name=name))
+        titel = None
+        if datum or name:
+            b = w["ausgezahlt"]
+            teile = [datum.isoformat() if datum else "", re.sub(r"\s+", " ", name or "")[:60].strip(), "Zahlungsbericht",
+                     (invoice.money(b).replace(".", ",") + " " + (inv["currency"] or "EUR")) if b is not None else ""]
+            titel = " ".join(t for t in teile if t)[:127]
+        felder = self._feldwerte(m, "ok")
+        if "pruefstatus" in self.felder:
+            felder.pop(self.felder["pruefstatus"][0], None)
+        return felder, titel, codes
 
     def _mahnung(self, inv: dict, roh: str) -> tuple[dict[int, object], str | None, list[str]]:
         """Zahlungsangaben einer Mahnung fuer die Felder (E77): Absender, Datum, offener Betrag, IBAN und

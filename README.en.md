@@ -333,6 +333,17 @@ Line items change neither the header data nor the review status of the document.
 
 **Data protection:** line items can contain data about persons, e.g. laboratory services. The feature is therefore off until it is switched on deliberately.
 
+## Reminders and payment reports
+
+Neither is an invoice: they get no invoice tags and no sidecar, but the data needed to work with them.
+
+| Kind | Fields | Title |
+|---|---|---|
+| `mahnung` (reminder) | sender, date, amount due, IBAN, payment reference | `date sender Mahnung amount` |
+| `zahlungsbericht` (payment provider, card terminal) | sender, date, processed payments in `brutto`, fees in `gebuehren`, paid-out amount in `zahlbetrag` | `date sender Zahlungsbericht amount` |
+
+The fee field is optional: create a monetary field in paperless (e.g. "Erkannt: Gebühren") and enter it under `felder` as `gebuehren`. Tags of their own come from `kategorie_tags`, e.g. `"mahnung": ["Mahnung"], "zahlungsbericht": ["Zahlungsbericht"]`.
+
 ## File numbers as tags
 
 If file numbers exist in paperless as tags, nopaper assigns them. Add this under `tags` in the configuration:

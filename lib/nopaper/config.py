@@ -29,6 +29,7 @@ FELD_TYPEN = {
     "steuer_niedrig": "monetary",
     "skonto": "string",
     "zahlbetrag": "monetary",
+    "gebuehren": "monetary",        # Zahlungsbericht: Gebuehren des Zahlungsdienstleisters (E82)
     "iban": "string",
     "verwendungszweck": "string",
     "pruefstatus": "string",

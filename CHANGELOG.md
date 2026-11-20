@@ -2,6 +2,13 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.10.0
+
+- **Zahlungsberichte** (E82): Berichte von Zahlungsdienstleistern und Kartenterminals sind eine eigene Belegart `zahlungsbericht`. nopaper schreibt die verarbeiteten Zahlungen in `Erkannt: Betrag brutto`, die Gebühren in das neue Feld `felder.gebuehren` und den ausgezahlten Betrag in `Erkannt: Zahlbetrag`, dazu Absender, Datum und den Titel `Datum Absender Zahlungsbericht Betrag`. Jeder Betrag nur, wenn er wörtlich im Text steht.
+- Ein Zahlungsbericht ist reine Information: keine Rechnungs-Tags, kein Sidecar, kein Prüf-Tag – außer wenn gar kein Betrag gelesen wurde.
+- Erkannt wird er auch dann, wenn das Modell ihn falsch einordnet, sofern das Dokument sich am Anfang selbst so nennt (Zahlungsbericht, Auszahlungsbericht, Umsatzbericht, Payout Report).
+- Eigenes Tag über `kategorie_tags`, zum Beispiel `"zahlungsbericht": ["Zahlungsbericht"]`.
+
 ## 1.9.9
 
 - **Ein Betrag von 0,00 gilt nicht als gelesen** (E81): Liefert das Modell als Endbetrag 0,00, wird das Dokument nicht mehr als Rechnung über 0,00 EUR angelegt, sondern geht ohne Titel, Rechnungs-Tags und Sidecar in die Prüfung. Anlass: Zahlungsbericht eines Kartenzahlungsdienstes mit mehreren Beträgen; gelesen wurde die „0,00“ der Abzüge, und weil sie wörtlich im Text stand, galt der Beleg als in Ordnung.
