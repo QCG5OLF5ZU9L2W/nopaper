@@ -257,10 +257,24 @@ Limits: so far this mode has only run in the offline tests. The cross-check betw
 | Path | Trigger | What nopaper does |
 |---|---|---|
 | Scanner | PDF in `eingang/rechnungen` or `eingang/dokumente` | classify, read, hand over to paperless, fields, title, sidecar |
-| Post-processing | tag from `tags.ausloeser_nachbearbeitung` on the document | read as invoice, fields, title, tags, sidecar; remove the tag |
+| Post-processing | tag from `tags.ausloeser_nachbearbeitung` on the document | read as invoice, fields, title, tags, sidecar; remove the tag. If it is not an invoice: only remove the tag and set the review tag |
 | Full text | tag from `tags.ausloeser_text` on the document | recognise and clean up the text again, replace the full text only; remove the tag |
 
 The full text is replaced only if the new text is not worse than the existing one.
+
+## Appointment from a court summons
+
+If a document carries the tag from `tags.ausloeser_text` and is a court summons, nopaper writes the hearing date into custom fields. Create the fields in paperless and enter them under `felder` in the configuration; each is optional:
+
+| Key in `felder` | Data type | Content |
+|---|---|---|
+| `termin` | Date | day of the hearing |
+| `terminzeit` | Text | time and room, e.g. "11:00 Uhr, Sitzungssaal V" |
+| `aktenzeichen` | Text | the court's file number |
+
+Detection uses fixed rules, no language model: only a date that stands next to "Termin", "Verhandlung", "geladen" or "anberaumt" and is followed by a time of day counts. If the date cannot be read reliably or several are in the text (for example a rescheduling notice), the fields stay empty and the document gets the review tag.
+
+The field is a working aid and does not replace deadline control: if text recognition misreads a digit, the wrong day ends up in the field. The summons itself is authoritative.
 
 ## Directories
 
