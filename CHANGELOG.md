@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.3
+
+- **Vorlauf** (E75): Während ein Dokument am Sprachmodell ist, holt und erkennt nopaper schon die nächsten beiden (Original laden, Prüfsumme, Texterkennung). Die Grafikkarte wartet dadurch nicht mehr auf die Texterkennung. Am Sprachmodell bleibt es bei einem Dokument nach dem anderen.
+- Im Journal erscheint „beginnt“ für das nächste Dokument deshalb schon, bevor das aktuelle fertig ist. `dauer=` nennt weiter die Arbeitszeit des einzelnen Dokuments, ohne Wartezeit.
+- Scheitert der Vorlauf eines Dokuments, betrifft das nur dieses Dokument.
+
 ## 1.9.2
 
 - **Weniger Umladen der Modelle auf einer Grafikkarte** (E74): Ein eigenes Glättungsmodell (`modelle.glaettung`) läuft jetzt mit kleinem Kontext (4.096 Token) statt mit `modelle.kontext`. Es braucht dadurch deutlich weniger Grafikspeicher und kann neben dem Auslese-Modell geladen bleiben.

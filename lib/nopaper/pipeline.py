@@ -14,6 +14,7 @@ import re
 import shutil
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import VERSION, codes as qr, invoice, llm, ocr, positionen, termin
@@ -35,6 +36,7 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
 # Pruefcodes, bei denen das Rechnungsdatum nicht als gesichert gilt
 DATUM_UNSICHER = ("FEHLT_RECHNUNGSDATUM", "DATUM_NICHT_IM_TEXT", "DATUM_MEHRDEUTIG", "RECHNUNGSDATUM_IN_ZUKUNFT")
 TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
+VORLAUF = 2     # so viele Dokumente werden hoechstens im Voraus geholt und erkannt (E75)
 # Fehler, die ein neuer Versuch nicht behebt: sofort Ausloeser entfernen und Pruef-Tag setzen
 ENDGUELTIG = ("FORMAT_NICHT_UNTERSTUETZT", "KEIN_OCR_TEXT")
 
@@ -594,27 +596,43 @@ class Nopaper:
         return art
 
     # ------------------------------------------------------------------ Weg 2: Nachbearbeitung
-    def nachbearbeiten(self, doc_id: int, erzwingen: bool = False) -> str:
-        """Dokument mit Rechnungs-Ausloeser als Rechnung auslesen. Ordnet das Modell es nicht als Rechnung
-        ein, wird nichts erfunden: Ausloeser weg, Pruef-Tag dran, weiter (KEINE_RECHNUNG, E63).
-        `erzwingen` (nur `nopaper nachbearbeiten <id>` von Hand): trotzdem als Rechnung behandeln."""
-        self.ids_laden()
-        c = self.cfg
-        t0 = time.monotonic()
+    def _vorbereiten(self, doc_id: int) -> dict:
+        """Vorlauf eines Dokuments ohne Sprachmodell (E75): Original holen, Pruefsumme, Texterkennung. Laeuft
+        fuer die naechsten Dokumente schon, waehrend das aktuelle am Modell ist. Das Arbeitsverzeichnis gehoert
+        danach dem Aufrufer (`with v["tmp"]`); scheitert der Vorlauf, wird es hier aufgeraeumt."""
+        t = time.monotonic()
         log.info("doc=%s beginnt: original holen, text erkennen", doc_id)
-        doc = self.pl.dokument(doc_id)
-        meta = self.pl.metadaten(doc_id)
-        with tempfile.TemporaryDirectory(dir=c.arbeit, prefix=".tmp-") as tmp:
-            workdir = Path(tmp)
+        tmp = tempfile.TemporaryDirectory(dir=self.cfg.arbeit, prefix=".tmp-")
+        try:
+            workdir = Path(tmp.name)
+            meta = self.pl.metadaten(doc_id)
             original = workdir / "original.pdf"
             sha_o, md5_o = self.pl.hashes(doc_id, original=True, ziel=original)
             if not pruefsumme_passt(meta.get("original_checksum"), sha_o, md5_o):
                 raise PaperlessFehler("INTEGRITAET_ORIGINAL")
             if (meta.get("original_mime_type") or "application/pdf") != "application/pdf":
                 raise PaperlessFehler("FORMAT_NICHT_UNTERSTUETZT")
-            roh = self.ocr_text(original, workdir, c.ocr_sprache)
+            roh = self.ocr_text(original, workdir, self.cfg.ocr_sprache)
             if not roh.strip():
                 raise PaperlessFehler("KEIN_OCR_TEXT")
+        except BaseException:
+            tmp.cleanup()
+            raise
+        return {"tmp": tmp, "original": original, "meta": meta, "sha_o": sha_o, "md5_o": md5_o, "roh": roh,
+                "dauer": time.monotonic() - t}
+
+    def nachbearbeiten(self, doc_id: int, erzwingen: bool = False, vorb: dict | None = None) -> str:
+        """Dokument mit Rechnungs-Ausloeser als Rechnung auslesen. Ordnet das Modell es nicht als Rechnung
+        ein, wird nichts erfunden: Ausloeser weg, Pruef-Tag dran, weiter (KEINE_RECHNUNG, E63).
+        `erzwingen` (nur `nopaper nachbearbeiten <id>` von Hand): trotzdem als Rechnung behandeln."""
+        self.ids_laden()
+        c = self.cfg
+        v = vorb or self._vorbereiten(doc_id)
+        t0 = time.monotonic() - v["dauer"]
+        with v["tmp"] as tmp:
+            workdir = Path(tmp)
+            original, meta, sha_o, md5_o, roh = v["original"], v["meta"], v["sha_o"], v["md5_o"], v["roh"]
+            doc = self.pl.dokument(doc_id)      # frisch: Tags und Felder koennen sich seit dem Vorlauf geaendert haben
             log.info("doc=%s text erkannt (%d zeichen, %.0fs): einordnen und auslesen mit dem modell", doc_id,
                      len(roh), time.monotonic() - t0)
             inv, issues, notes, methode, modell = self._rechnung_auslesen(
@@ -717,28 +735,19 @@ class Nopaper:
         return n
 
     # ------------------------------------------------------------------ Weg 3: nur Volltext erneuern
-    def text_verbessern(self, doc_id: int) -> str:
+    def text_verbessern(self, doc_id: int, vorb: dict | None = None) -> str:
         """Dokument mit Text-Ausloeser: Text neu erkennen und glaetten, den Volltext zurueckschreiben
         (kein Titel, kein Sidecar, keine Rechnungsfelder). Ersetzt wird nur, wenn der neue Text nicht
         schlechter ist als der vorhandene. Sind Termin-Felder eingerichtet (E62), wird bei einer Ladung
         zusaetzlich der Verhandlungstermin in diese Felder geschrieben."""
         self.ids_laden()
         c = self.cfg
-        t0 = time.monotonic()
-        log.info("doc=%s beginnt: original holen, text erkennen", doc_id)
-        doc = self.pl.dokument(doc_id)
-        meta = self.pl.metadaten(doc_id)
-        with tempfile.TemporaryDirectory(dir=c.arbeit, prefix=".tmp-") as tmp:
+        v = vorb or self._vorbereiten(doc_id)
+        t0 = time.monotonic() - v["dauer"]
+        with v["tmp"] as tmp:
             workdir = Path(tmp)
-            original = workdir / "original.pdf"
-            sha_o, md5_o = self.pl.hashes(doc_id, original=True, ziel=original)
-            if not pruefsumme_passt(meta.get("original_checksum"), sha_o, md5_o):
-                raise PaperlessFehler("INTEGRITAET_ORIGINAL")
-            if (meta.get("original_mime_type") or "application/pdf") != "application/pdf":
-                raise PaperlessFehler("FORMAT_NICHT_UNTERSTUETZT")
-            roh = self.ocr_text(original, workdir, c.ocr_sprache)
-            if not roh.strip():
-                raise PaperlessFehler("KEIN_OCR_TEXT")
+            original, meta, sha_o, md5_o, roh = v["original"], v["meta"], v["sha_o"], v["md5_o"], v["roh"]
+            doc = self.pl.dokument(doc_id)      # frisch: Tags und Felder koennen sich seit dem Vorlauf geaendert haben
             return self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_text, t0)
 
     def _dokumentweg(self, doc_id: int, doc: dict, original: Path, workdir: Path, roh: str, ausloeser: int,
@@ -811,13 +820,42 @@ class Nopaper:
             schon = {d for d, _, _ in auftraege}
             auftraege += [(d, self.tag_text, self.text_verbessern) for d in self.pl.mit_tag(self.tag_text)
                           if d not in schon]
-        for doc_id, tag_ausloeser, verarbeiten in auftraege:
+        faellig = []
+        for auftrag in auftraege:
+            row = self.state.nach(auftrag[0])
+            if not (row and row["nicht_vor"] > time.time()):
+                faellig.append(auftrag)
+        if not faellig:
+            return 0
+        # E75: Ein Helfer holt und erkennt schon die naechsten Dokumente (CPU), waehrend das aktuelle am
+        # Sprachmodell ist (Grafikkarte). Am Modell bleibt es bei einem Dokument nach dem anderen.
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vorlauf")
+        vorlauf: dict[int, object] = {}
+
+        def vorbereiten_bis(i: int) -> None:
+            for j in range(i, min(i + 1 + VORLAUF, len(faellig))):
+                if j not in vorlauf:
+                    vorlauf[j] = pool.submit(self._vorbereiten, faellig[j][0])
+
+        try:
+            return self._auftraege_abarbeiten(faellig, vorlauf, vorbereiten_bis)
+        finally:
+            for f in vorlauf.values():          # nicht mehr gebrauchte Vorlaeufe: abbrechen bzw. aufraeumen
+                if not f.cancel():
+                    try:
+                        f.result()["tmp"].cleanup()
+                    except Exception:
+                        pass
+            pool.shutdown(wait=True)
+
+    def _auftraege_abarbeiten(self, faellig: list, vorlauf: dict, vorbereiten_bis) -> int:
+        n = 0
+        for i, (doc_id, tag_ausloeser, verarbeiten) in enumerate(faellig):
             row = self.state.nach(doc_id)
-            if row and row["nicht_vor"] > time.time():
-                continue
             versuche = row["versuche"] if row else 0
+            vorbereiten_bis(i)
             try:
-                verarbeiten(doc_id)
+                verarbeiten(doc_id, vorb=vorlauf.pop(i).result())
                 self.state.nach_loeschen(doc_id)
                 n += 1
             except (Voruebergehend, llm.OllamaNichtErreichbar) as e:

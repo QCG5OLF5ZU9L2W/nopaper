@@ -1136,6 +1136,41 @@ class NopaperTest(unittest.TestCase):
         np.ein_durchlauf()
         self.assertEqual({k for m, s, k in W.kontexte}, {16384})
 
+    # ------------------------------------------------------------------ Vorlauf (E75)
+    def test_vorlauf_mehrere_dokumente(self):
+        np = self.paperless_zuerst()
+        folge = []
+
+        def ocr_mit_spur(original, workdir, sprache="deu"):
+            folge.append(("ocr", original.read_bytes()[-1:]))
+            return fake_ocr(original, workdir, sprache)
+        np.ocr_text = ocr_mit_spur
+        for i, ende in ((95, b"a"), (96, b"b"), (97, b"c"), (98, b"d")):
+            W.docs[i] = {"id": i, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                         "original": b"%PDF RECHNUNG vorlauf " + ende, "archive": b"A"}
+        W.docs[96]["original"] = b"%PDF leer b"                  # kein erkennbarer Text: scheitert im Vorlauf
+        self.assertEqual(np.nachbearbeitung_abfragen(), 3)
+        for i in (95, 97, 98):
+            self.assertIn("Rechnung", self.tagnamen(i))
+            self.assertNotIn("nopaper Rechnung", self.tagnamen(i))
+        self.assertEqual(self.tagnamen(96), {"nopaper prüfen"})   # Fehler eines Vorlaufs trifft nur dieses Dokument
+        self.assertEqual(sorted(e[1] for e in folge), [b"a", b"b", b"c", b"d"])
+        self.assertFalse(list(self.cfg.arbeit.glob(".tmp-*")))    # keine Arbeitsverzeichnisse bleiben liegen
+
+    def test_vorlauf_raeumt_bei_abbruch_auf(self):
+        np = self.paperless_zuerst()
+        for i in (95, 96, 97):
+            W.docs[i] = {"id": i, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                         "original": b"%%PDF RECHNUNG abbruch %d" % i, "archive": b"A"}
+
+        def kaputt(*a, **k):
+            raise llm.OllamaNichtErreichbar("aus")
+        np.ki.chat_json = kaputt
+        np.ki._post = kaputt
+        self.assertEqual(np.nachbearbeitung_abfragen(), 0)        # voruebergehend: Runde endet, nichts geht verloren
+        self.assertTrue(all(5 in W.docs[i]["tags"] for i in (95, 96, 97)))
+        self.assertFalse(list(self.cfg.arbeit.glob(".tmp-*")))
+
     def test_fehlerantwort_nur_feldnamen(self):
         from nopaper.paperless import _fehlerschluessel
         antwort = json.dumps({"custom_fields": [{}, {"non_field_errors": ["Wert 'Muster 11:00 Uhr' ungueltig"]}],
