@@ -51,6 +51,9 @@ Termin zur muendlichen Verhandlung vor der Einzelrichterin wird anberaumt auf
 Zu diesem Termin werden Sie hiermit geladen.
 """
 
+# Rechnung, deren Nummer von Hand hinter "RE-Nr." eingetragen ist: die Texterkennung liest sie nicht
+HANDNR_TEXT = RECHNUNG_TEXT.replace("Rechnuug Nr. RE-2026-0815", "Rechnung   RE-Nr. ..............")
+
 BRIEF_TEXT = "Sehr geehrte Damen und Herreu,\nanbei die Unterlagen vom 12.10.2026.\nMit freundlichen Gruessen"
 
 LLM_RECHNUNG = {
@@ -277,6 +280,8 @@ def fake_ocr(original: Path, workdir: Path, sprache: str = "deu") -> str:
                 "Neuer Termin: 15.01.2027, 11:00 Uhr, Saal 2\n")
     if b"LADUNG" in data:
         return LADUNG_TEXT
+    if b"HANDNR" in data:
+        return HANDNR_TEXT
     return RECHNUNG_TEXT if b"RECHNUNG" in data else (BRIEF_TEXT if b"BRIEF" in data else "")
 
 
@@ -1048,6 +1053,66 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(W.docs[93]["content"], "alt")
         self.assertIsNone(self.np.state.nach(93))                             # kein weiterer Versuch vorgemerkt
         self.assertEqual(aufrufe[-1], ["tags"])
+
+    # ------------------------------------------------------------------ Rechnungsnummer von Hand (E64)
+    def handnr(self, erst, bild, nuextract=False):
+        """Nachbearbeitung eines Scans mit handschriftlicher Nummer; erst/bild = Nummer der ersten Lesung bzw.
+        des Bild-Rueckfalls (None = nicht gelesen)."""
+        from nopaper import ocr
+
+        def ext(nr):
+            e = copy.deepcopy(LLM_RECHNUNG)
+            e["invoice_number"] = nr
+            e["payment"]["reference"] = None
+            return e
+        W.extraktion, W.bild_extraktion = ext(erst), ext(bild)
+        if nuextract:
+            self.cfg.extraktor, self.cfg.modell_extraktion = "nuextract3", "numind/nuextract3:Q6_K"
+            self.cfg.nuextract_eingabe = "bild"
+        W.docs[95] = {"id": 95, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF HANDNR", "archive": b"A"}
+        alt = ocr.seiten_als_bilder
+        ocr.seiten_als_bilder = lambda *a, **k: ["QklMRA=="]
+        try:
+            self.np.nachbearbeitung_abfragen()
+        finally:
+            ocr.seiten_als_bilder = alt
+        _, note = self.note(95)
+        return self.feld(95, "Erkannt: Rechnungsnummer"), note
+
+    def test_handschriftliche_nummer_nur_vom_bildmodell_gelesen(self):
+        nr, note = self.handnr(erst=None, bild="241126-07")
+        self.assertEqual(nr, "241126-07")                                   # steht im Feld ...
+        self.assertEqual(note["pruefstatus"], "pruefen")                    # ... aber ein Mensch bestaetigt sie
+        self.assertIn("RECHNUNGSNUMMER_AUS_BILD", note["pruefhinweise"])
+        self.assertIn("RECHNUNGSNUMMER_NICHT_IM_TEXT", note["pruefhinweise"])
+        self.assertNotIn("FEHLT_RECHNUNGSNUMMER", note["pruefhinweise"])
+
+    def test_handschriftliche_nummer_von_zwei_bildmodellen_gleich_gelesen(self):
+        nr, note = self.handnr(erst="241126-07", bild="241126-07", nuextract=True)
+        self.assertEqual(nr, "241126-07")
+        self.assertEqual(note["pruefstatus"], "ok", note.get("pruefhinweise"))
+        self.assertIn("RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN", note["pruefhinweise"])
+
+    def test_handschriftliche_nummer_verschieden_gelesen(self):
+        nr, note = self.handnr(erst="241126-07", bild="247126-01", nuextract=True)
+        self.assertEqual(nr, "241126-07")
+        self.assertEqual(note["pruefstatus"], "pruefen")
+        self.assertIn("RECHNUNGSNUMMER_NICHT_IM_TEXT", note["pruefhinweise"])
+        self.assertNotIn("RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN", note["pruefhinweise"])
+
+    def test_handschriftliche_nummer_textmodell_und_bildmodell_zaehlen_nicht_als_zwei_bildlesungen(self):
+        # die erste Lesung kam vom Textmodell (das die Handschrift gar nicht sehen kann): keine Bestaetigung
+        nr, note = self.handnr(erst="241126-07", bild="241126-07", nuextract=False)
+        self.assertEqual(note["pruefstatus"], "pruefen")
+
+    def test_rechnungsnummer_bezeichnung(self):
+        b = invoice.rechnungsnummer_bezeichnet
+        for t in ("RE-Nr. ............", "Rechnungs-Nr.:", "Rechnungsnummer", "Rg.-Nr. 5", "Rechnung Nr. 12",
+                  "Beleg-Nr.", "Invoice No"):
+            self.assertTrue(b(t), t)
+        for t in ("Kunden-Nr. 4711", "St.-Nr. 12/345/67890", "Tel.-Nr. 030 1234", "Rechnung vom 03.11.2026"):
+            self.assertFalse(b(t), t)
 
     def test_ollama_weg(self):
         self.np.ki.url = "http://127.0.0.1:1"
