@@ -90,6 +90,7 @@ class Config:
     betriebsart: str = "scanner"           # scanner (bisher) | paperless (E61: erst paperless, zustandslos)
     dokumentdatum_setzen: bool = True      # nur Betriebsart paperless: "Erstellt am" = Rechnungsdatum (E66)
     positionen: bool = False               # E72: Rechnungspositionen lesen und in den Sidecar schreiben
+    vorlauf: int = 3                       # E79: so viele Dokumente gleichzeitig holen und erkennen (1-8)
 
     @property
     def zustandslos(self) -> bool:
@@ -157,6 +158,9 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
     if ca and not testlauf and not Path(ca).is_file():
         raise ConfigError(f"paperless.ca_datei {ca} nicht gefunden")
 
+    if not (isinstance(d.get("vorlauf", 3), int) and not isinstance(d.get("vorlauf", 3), bool)
+            and 1 <= d.get("vorlauf", 3) <= 8):
+        raise ConfigError("vorlauf muss eine ganze Zahl von 1 bis 8 sein")
     if not isinstance(d.get("positionen", False), bool):
         raise ConfigError("positionen muss true oder false sein")
     tags = _req(d, "tags")
@@ -233,6 +237,7 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         betriebsart=betriebsart,
         dokumentdatum_setzen=bool(d.get("dokumentdatum_setzen", True)),
         positionen=d.get("positionen", False),
+        vorlauf=d.get("vorlauf", 3),
     )
     if not testlauf and (not cfg.empfaenger or cfg.empfaenger.lower().startswith("muster")):
         raise ConfigError("empfaenger ist noch der Platzhalter – bitte den Namen der eigenen Organisation eintragen")

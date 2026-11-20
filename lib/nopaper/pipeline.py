@@ -36,7 +36,6 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
 # Pruefcodes, bei denen das Rechnungsdatum nicht als gesichert gilt
 DATUM_UNSICHER = ("FEHLT_RECHNUNGSDATUM", "DATUM_NICHT_IM_TEXT", "DATUM_MEHRDEUTIG", "RECHNUNGSDATUM_IN_ZUKUNFT")
 TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
-VORLAUF = 2     # so viele Dokumente werden hoechstens im Voraus geholt und erkannt (E75)
 # Fehler, die ein neuer Versuch nicht behebt: sofort Ausloeser entfernen und Pruef-Tag setzen
 ENDGUELTIG = ("FORMAT_NICHT_UNTERSTUETZT", "KEIN_OCR_TEXT")
 
@@ -907,11 +906,12 @@ class Nopaper:
             return 0
         # E75: Ein Helfer holt und erkennt schon die naechsten Dokumente (CPU), waehrend das aktuelle am
         # Sprachmodell ist (Grafikkarte). Am Modell bleibt es bei einem Dokument nach dem anderen.
-        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vorlauf")
+        helfer = self.cfg.vorlauf      # so viele Dokumente werden gleichzeitig geholt und erkannt (E79)
+        pool = ThreadPoolExecutor(max_workers=helfer, thread_name_prefix="vorlauf")
         vorlauf: dict[int, object] = {}
 
         def vorbereiten_bis(i: int) -> None:
-            for j in range(i, min(i + 1 + VORLAUF, len(faellig))):
+            for j in range(i, min(i + 1 + 2 * helfer, len(faellig))):
                 if j not in vorlauf:
                     vorlauf[j] = pool.submit(self._vorbereiten, faellig[j][0])
 

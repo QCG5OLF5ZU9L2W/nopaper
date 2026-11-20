@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.7
+
+- **Vorlauf mit mehreren Helfern** (E79): Drei Dokumente werden gleichzeitig geholt und erkannt statt eines, bis zu sechs liegen bereit. Anlass: Im Stapel stand die Grafikkarte 20 bis 40 Sekunden still, weil die Texterkennung eines mehrseitigen Scans länger dauert als die Modellarbeit an den Dokumenten davor. Einstellbar mit `"vorlauf": 1` bis `8` auf der obersten Ebene der Konfiguration.
+- **Kein Hin-und-her-Laden zwischen Kontextstufen:** Ein Modell fällt nicht mehr unter eine Stufe zurück, die es schon gebraucht hat (bis 16.384 Token). Bisher lud Ollama das Auslese-Modell bei jedem Wechsel zwischen digitaler PDF und Scan neu.
+
 ## 1.9.6
 
 - **Weniger Leerlauf der Grafikkarte zwischen den Modellaufrufen** (E78): Strich- und QR-Codes und die Tag-Liste für die Aktenzeichen holt nopaper jetzt schon im Vorlauf; die Prüfsumme der Archivfassung läuft nebenher, während das Modell weiterarbeitet.
