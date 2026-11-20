@@ -185,6 +185,8 @@ def main(argv=None) -> int:
                     ok = False
                     print(f"FEHL Feld '{cfg.felder[key]}' hat in paperless den Datentyp '{typ}', nopaper schreibt "
                           f"dort '{soll}' – paperless lehnt den Wert ab. Feld mit dem richtigen Datentyp neu anlegen.")
+            if cfg.positionen:
+                print(f"     Rechnungspositionen werden gelesen (Modell {cfg.modell_text}) und stehen im Sidecar")
             print(f"     offene Nachbearbeitungen: {len(np.pl.mit_tag(np.tag_ausloeser))}")
             if cfg.tags_aktenzeichen:
                 from . import termin

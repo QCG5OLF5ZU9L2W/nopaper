@@ -1,4 +1,5 @@
 {
+  "positionen": false,
   "paperless": {
     "url": "https://paperless.beispiel.intern",
     "token_datei": "/etc/nopaper/paperless.token",

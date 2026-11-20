@@ -287,6 +287,35 @@ Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das 
 
 Das Feld ist eine Arbeitshilfe und ersetzt keine Fristenkontrolle: Liest die Texterkennung eine Ziffer falsch, steht der falsche Tag im Feld. Maßgeblich ist die Ladung selbst.
 
+## Rechnungspositionen für die Warenwirtschaft
+
+Standardmäßig liest nopaper nur die Kopfdaten einer Rechnung. Mit
+
+```json
+"positionen": true
+```
+
+auf der obersten Ebene der Konfiguration liest es bei Rechnungen, Gutschriften und Kassenbons zusätzlich die Positionen und schreibt sie in den Sidecar am Dokument.
+
+| Angabe | Im Sidecar (je `IncludedSupplyChainTradeLineItem`) |
+|---|---|
+| Artikelnummer des Lieferanten | `SpecifiedTradeProduct/SellerAssignedID` |
+| Bezeichnung | `SpecifiedTradeProduct/Name` |
+| Menge | `BilledQuantity` (`unitCode` ist die Einheit als Code der Norm) |
+| Einzelpreis | `NetPriceProductTradePrice/ChargeAmount`, bei Bruttopreisen `GrossPriceProductTradePrice` |
+| Zeilenbetrag | `SpecifiedTradeSettlementLineMonetarySummation/LineTotalAmount` |
+| Steuersatz | `ApplicableTradeTax/RateApplicablePercent` |
+| Positionsnummer, Einheit und Inhalt der Einheit wie gedruckt | Notiz der Zeile: `pos=…`, `einheit=Packung`, `inhalt=100 Stück` |
+
+Ob die Positionen stimmen, steht im Herkunftsnachweis des Sidecars:
+
+- `positionen-status=belegt`: Jeder Zeilenbetrag steht im Text, jede Zeile rechnet sich auf, und die Summe trifft das Netto (`positionen-preise=netto`) oder das Brutto (`brutto`) der Rechnung.
+- `positionen-status=abweichend`: Die Positionen stehen trotzdem im Sidecar, sind aber nicht bestätigt. Der Grund steht in `pruefhinweise`.
+
+Die Positionen ändern weder die Kopfdaten noch den Prüfstatus des Belegs. nopaper rechnet keine Einheiten um und ordnet keine Artikel zu; das ist Sache der Warenwirtschaft.
+
+**Datenschutz:** Positionen können Angaben über Personen enthalten, etwa Laborleistungen. Deshalb ist die Funktion abgeschaltet, bis sie bewusst eingeschaltet wird.
+
 ## Aktenzeichen als Tag
 
 Sind die Aktenzeichen in paperless als Tags angelegt, ordnet nopaper sie zu. Dafür in der Konfiguration unter `tags` eintragen:

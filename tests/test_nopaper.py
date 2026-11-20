@@ -37,6 +37,20 @@ Steuerfrei nach § 4 Nr. 14 UStG
 Rechnungsbetrag 1.234,56 EUR
 IBAN DE89 3704 0044 0532 0130 00"""
 
+POSITIONEN_TEXT = """
+Pos Art-Nr. Bezeichnung               Menge          Einzelpreis   Gesamtpreis
+  1 4711    Musterhandschuhe Nitril   2 Packung      400,0000 EUR  800,0000 EUR
+            1 Packung = 100 Stück
+  2 4712    Musterpapier weiss        1 Karton       434,5600 EUR  434,5600 EUR
+"""
+POSITIONEN = [
+    {"pos": "1", "artikelnummer": "4711", "bezeichnung": "Musterhandschuhe Nitril", "menge": "2",
+     "einheit": "Packung", "inhalt": "100 Stück", "einzelpreis": "400,0000", "gesamtpreis": "800,0000",
+     "steuersatz": None},
+    {"pos": "2", "artikelnummer": "4712", "bezeichnung": "Musterpapier weiss", "menge": "1", "einheit": "Karton",
+     "inhalt": None, "einzelpreis": "434,5600", "gesamtpreis": "434,5600", "steuersatz": None},
+]
+
 LADUNG_TEXT = """Verwaltungsgericht Musterstadt
 Musterallee 1, 12345 Musterstadt                      Musterstadt, 12.11.2026
 Az.: 7 A 1234/26 MS
@@ -88,6 +102,7 @@ class Welt:
         self.uploads = 0
         self.dateinamen = []
         self.einordnung = "rechnung"
+        self.positionen = []
         self.extraktion = LLM_RECHNUNG
         self.bild_extraktion = None
         self.glaettung_kaputt = False
@@ -264,7 +279,9 @@ class Handler(BaseHTTPRequestHandler):
         system = req["messages"][0]["content"]
         user = req["messages"][1]["content"]
         W.llm_calls.append((req["model"], system[:20], bool(req["messages"][1].get("images"))))
-        if system.startswith("Du korrigierst"):
+        if system.startswith("Du liest die Positionen"):
+            ans = {"positionen": W.positionen}
+        elif system.startswith("Du korrigierst"):
             t = user.replace("Rechnuug", "Rechnung").replace("Herreu", "Herren")
             if W.glaettung_kaputt:
                 t = t.replace("1.234,56", "1.234,59")
@@ -283,6 +300,8 @@ def fake_ocr(original: Path, workdir: Path, sprache: str = "deu") -> str:
                 "Neuer Termin: 15.01.2027, 11:00 Uhr, Saal 2\n")
     if b"LADUNG" in data:
         return LADUNG_TEXT
+    if b"POSRECHNUNG" in data:
+        return RECHNUNG_TEXT + POSITIONEN_TEXT
     if b"HANDNR" in data:
         return HANDNR_TEXT
     return RECHNUNG_TEXT if b"RECHNUNG" in data else (BRIEF_TEXT if b"BRIEF" in data else "")
@@ -999,6 +1018,96 @@ class NopaperTest(unittest.TestCase):
                       "original": b"%PDF LADUNG az3", "archive": b"A"}
         np.nachbearbeitung_abfragen()
         self.assertEqual(self.tagnamen(89), {"Scan"})
+
+    # ------------------------------------------------------------------ Rechnungspositionen (E72)
+    def mit_positionen(self):
+        np = self.paperless_zuerst(positionen=True)
+        W.positionen = copy.deepcopy(POSITIONEN)
+        return np
+
+    def sidecar(self, doc_id):
+        return ET.fromstring(self.feld(doc_id, "Erkannt: Sidecar"))
+
+    def test_positionen_im_sidecar(self):
+        np = self.mit_positionen()
+        W.docs[90] = {"id": 90, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF POSRECHNUNG 1", "archive": b"A"}
+        np.ein_durchlauf()
+        x = self.sidecar(90)
+        ns = {"ram": invoice.NS["ram"], "rsm": invoice.NS["rsm"]}
+        zeilen = x.findall(".//ram:IncludedSupplyChainTradeLineItem", ns)
+        self.assertEqual(len(zeilen), 2)
+        z = zeilen[0]
+        self.assertEqual(z.findtext(".//ram:SellerAssignedID", namespaces=ns), "4711")
+        self.assertEqual(z.findtext(".//ram:Name", namespaces=ns), "Musterhandschuhe Nitril")
+        menge = z.find(".//ram:BilledQuantity", ns)
+        self.assertEqual((menge.text, menge.get("unitCode")), ("2", "PK"))
+        self.assertEqual(z.findtext(".//ram:NetPriceProductTradePrice/ram:ChargeAmount", namespaces=ns), "400.0000")
+        self.assertEqual(z.findtext(".//ram:LineTotalAmount", namespaces=ns), "800.0000")
+        self.assertEqual(z.findtext(".//ram:AssociatedDocumentLineDocument/ram:IncludedNote/ram:Content", namespaces=ns),
+                         "pos=1\neinheit=Packung\ninhalt=100 Stück")
+        notiz = x.findtext("./rsm:ExchangedDocument/ram:IncludedNote/ram:Content", namespaces=ns)
+        self.assertIn("positionen-status=belegt", notiz)
+        self.assertIn("positionen-anzahl=2", notiz)
+        self.assertIn("positionen-preise=netto", notiz)
+        self.assertIn("POSITIONEN_BELEGT", notiz)
+        self.assertIn("pruefstatus=ok", notiz)
+        self.assertIn("urn:factur-x.eu:1p0:basic", x.findtext(".//ram:GuidelineSpecifiedDocumentContextParameter/ram:ID",
+                                                               namespaces=ns))
+        # die Reihenfolge der Norm: Positionen vor den Kopfangaben
+        kinder = [k.tag.split("}")[1] for k in x.find("./rsm:SupplyChainTradeTransaction", ns)]
+        self.assertEqual(kinder[:3], ["IncludedSupplyChainTradeLineItem", "IncludedSupplyChainTradeLineItem",
+                                      "ApplicableHeaderTradeAgreement"])
+        self.assertEqual(self.tagnamen(90) & {"nopaper prüfen"}, set())
+
+    def test_positionen_abweichend_aendern_den_pruefstatus_nicht(self):
+        np = self.mit_positionen()
+        W.positionen[1]["gesamtpreis"] = "434,5700"          # steht so nicht im Text, Summe passt nicht
+        W.docs[91] = {"id": 91, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF POSRECHNUNG 2", "archive": b"A"}
+        np.ein_durchlauf()
+        notiz = self.sidecar(91).findtext(".//{%s}IncludedNote/{%s}Content" % (invoice.NS["ram"], invoice.NS["ram"]))
+        self.assertIn("positionen-status=abweichend", notiz)
+        self.assertIn("POSITIONEN_BETRAG_NICHT_IM_TEXT", notiz)
+        self.assertIn("pruefstatus=ok", notiz)                # Kopfdaten und Pruefstatus bleiben
+        self.assertNotIn("nopaper prüfen", self.tagnamen(91))
+
+    def test_ohne_schalter_keine_positionen(self):
+        np = self.paperless_zuerst()
+        W.positionen = copy.deepcopy(POSITIONEN)
+        W.docs[92] = {"id": 92, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF POSRECHNUNG 3", "archive": b"A"}
+        np.ein_durchlauf()
+        xml = self.feld(92, "Erkannt: Sidecar")
+        self.assertNotIn("IncludedSupplyChainTradeLineItem", xml)
+        self.assertIn("urn:factur-x.eu:1p0:basicwl", xml)
+        self.assertFalse([c for c in W.llm_calls if c[1].startswith("Du liest die Posit")])
+
+    def test_positionen_regeln(self):
+        from nopaper import positionen as p
+        D = Decimal
+        self.assertEqual([p.zahl(s) for s in ("8,1933", "1.234,56", "1,234.56", "16.6807", "1.000", "3,00-", "-0,77 €",
+                                              "12", "x", None)],
+                         [D("8.1933"), D("1234.56"), D("1234.56"), D("16.6807"), D("1000"), D("-3.00"), D("-0.77"),
+                          D("12"), None, None])
+        self.assertEqual([p.dezimal(D(s)) for s in ("8.1933", "5", "2.5")], ["8.1933", "5.00", "2.50"])
+        self.assertEqual([p.einheit_code(e) for e in ("Packung", "Stk.", "Karton", "kg", "Gebinde", None)],
+                         ["PK", "C62", "CT", "KGM", "C62", "C62"])
+        self.assertEqual(p.abschnitte("a\nb\n\fc\n", 100), ["a\nb\n", "c\n"])
+        self.assertEqual(p.abschnitte("aaaa\nbbbb\ncccc\n", 10), ["aaaa\nbbbb\n", "cccc\n"])
+        text = "1 Muster 2 x 8,1933 16,3866\n2 Zweit 1 x 3,6134 3,6134\nNetto 20,00  MwSt 3,80  Gesamt 23,80"
+        pos = p.normalisieren([
+            {"bezeichnung": "Muster", "menge": "2", "einzelpreis": "8,1933", "gesamtpreis": "16,3866"},
+            {"bezeichnung": "Zweit", "menge": "1", "einzelpreis": "3,6134", "gesamtpreis": "3,6134"},
+            {"bezeichnung": "", "gesamtpreis": "1,00"}, {"bezeichnung": "ohne Betrag"}])
+        self.assertEqual(len(pos), 2)
+        inv = {"net": D("20.00"), "gross": D("23.80")}
+        self.assertEqual(p.pruefen(pos, inv, text), ("belegt", "netto", ["POSITIONEN_BELEGT"]))
+        self.assertEqual(p.pruefen(pos, {"net": None, "gross": D("20.00")}, text)[:2], ("belegt", "brutto"))
+        self.assertEqual(p.pruefen(pos[:1], inv, text), ("abweichend", None, ["POSITIONEN_SUMME_WEICHT_AB"]))
+        falsch = [dict(pos[0], menge=D("3")), pos[1]]
+        self.assertEqual(p.pruefen(falsch, inv, text)[2], ["POSITIONEN_ZEILE_RECHNET_NICHT"])
+        self.assertEqual(p.pruefen([], inv, text), ("keine", None, ["POSITIONEN_NICHT_GELESEN"]))
 
     def test_fehlerantwort_nur_feldnamen(self):
         from nopaper.paperless import _fehlerschluessel
