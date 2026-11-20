@@ -1230,6 +1230,23 @@ class NopaperTest(unittest.TestCase):
         self.assertIn("nopaper prüfen", self.tagnamen(99))
         self.assertEqual(self.feld(99, "Erkannt: Belegart"), "mahnung")
 
+    def test_kontext_faellt_nicht_zurueck(self):
+        o = llm.Ollama("http://127.0.0.1:1", num_ctx=65536)
+        self.assertEqual([o.kontext("a", k) for k in (8192, 16384, 8192, 65536, 8192)],
+                         [8192, 16384, 16384, 65536, 16384])     # nach dem langen Dokument wieder die mittlere Stufe
+        self.assertEqual(o.kontext("b", 4096), 4096)             # je Modell getrennt
+
+    def test_vorlauf_einstellung(self):
+        d = json.loads((self.tmp / "config.json").read_text())
+        for falsch in (0, 9, "3", True):
+            d["vorlauf"] = falsch
+            (self.tmp / "config.json").write_text(json.dumps(d))
+            with self.assertRaises(config.ConfigError):
+                config.load(self.tmp / "config.json")
+        d["vorlauf"] = 1
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        self.assertEqual(config.load(self.tmp / "config.json").vorlauf, 1)
+
     def test_stoppuhr(self):
         from nopaper.pipeline import Stoppuhr
         u = Stoppuhr(vorlauf=4.2)

@@ -23,6 +23,17 @@ class Ollama:
         self.num_ctx = num_ctx
         self.timeout = timeout
         self._think_ok: dict[str, bool] = {}
+        self._stufe: dict[str, int] = {}
+
+    def kontext(self, model: str, verlangt: int) -> int:
+        """Kontext fuer diesen Aufruf (E79): Ein Modell faellt nicht unter eine Stufe zurueck, die es schon
+        einmal gebraucht hat – sonst laedt Ollama es bei jedem Wechsel zwischen kleinen und mittleren
+        Dokumenten neu. Gemerkt wird nur bis 16.384; ein einzelnes sehr langes Dokument soll nicht dauerhaft
+        den grossen Kontext (und damit den Grafikspeicher) belegen."""
+        ctx = max(int(verlangt), self._stufe.get(model, 0))
+        if ctx <= 16384:
+            self._stufe[model] = ctx
+        return ctx
 
     def _post(self, path: str, payload: dict) -> dict:
         req = urllib.request.Request(self.url + path, data=json.dumps(payload).encode("utf-8"),
@@ -42,7 +53,7 @@ class Ollama:
             msg["images"] = images
         payload = {
             "model": model, "stream": False, "format": schema,
-            "options": {"temperature": 0, "num_ctx": num_ctx or self.num_ctx},
+            "options": {"temperature": 0, "num_ctx": self.kontext(model, num_ctx or self.num_ctx)},
             "messages": [{"role": "system", "content": system}, msg],
         }
         if self._think_ok.get(model, True):
@@ -370,8 +381,8 @@ def analysieren_nuextract(o: Ollama, model: str, text: str | None = None,
         user["images"] = bilder
     payload = {
         "model": model, "stream": False, "think": False,
-        "options": {"temperature": 0, "num_ctx": kontext_bilder(len(bilder), o.num_ctx) if bilder
-                    else kontext_text(len(user["content"]), o.num_ctx)},
+        "options": {"temperature": 0, "num_ctx": o.kontext(model, kontext_bilder(len(bilder), o.num_ctx) if bilder
+                                                         else kontext_text(len(user["content"]), o.num_ctx))},
         "messages": [
             {"role": "template", "content": json.dumps(NUEXTRACT_TEMPLATE, ensure_ascii=False, indent=2)},
             {"role": "instructions", "content": NUEXTRACT_INSTRUCTIONS},
