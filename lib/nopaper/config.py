@@ -11,6 +11,7 @@ DEFAULT_PATH = "/etc/nopaper/config.json"
 
 # Rechnungsdatum -> paperless-Datentyp
 FELD_TYPEN = {
+    "sidecar": "longtext",          # nur Betriebsart "paperless": Sidecar (CII-XML) als Feld am Dokument
     "rechnungsnummer": "string",
     "rechnungsdatum": "date",
     "faelligkeit": "date",
@@ -80,6 +81,11 @@ class Config:
     kumero_token_datei: str = ""
     kumero_ca_datei: str = ""
     test: Path = Path("/srv/nopaper/test")
+    betriebsart: str = "scanner"           # scanner (bisher) | paperless (E61: erst paperless, zustandslos)
+
+    @property
+    def zustandslos(self) -> bool:
+        return self.betriebsart == "paperless"
 
     @property
     def alle_tags(self) -> list[str]:
@@ -163,17 +169,23 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
     kategorie_tags = {k: _str_list(v, f"kategorie_tags.{k}") for k, v in kt.items()}
     mod = _req(d, "modelle")
     base = Path(d.get("basisverzeichnis", "/srv/nopaper"))
+    betriebsart = str(d.get("betriebsart", "scanner")).strip().lower()
+    if betriebsart not in ("scanner", "paperless"):
+        raise ConfigError("betriebsart muss 'scanner' oder 'paperless' sein")
+    ein, aus = d.get("eingang") or {}, d.get("ausgang") or {}
+    if betriebsart == "scanner":       # Ordner sind nur fuer den Scanner-Weg Pflicht
+        _req(d, "eingang.rechnungen"), _req(d, "eingang.dokumente"), _req(d, "ausgang.rechnungsdaten")
 
     cfg = Config(
         paperless_url=url,
         token=token,
         ca_datei=ca or None,
-        eingang_rechnungen=Path(_req(d, "eingang.rechnungen")),
-        eingang_dokumente=Path(_req(d, "eingang.dokumente")),
-        fehler=Path(d["eingang"].get("fehler", base / "fehler")),
+        eingang_rechnungen=Path(ein.get("rechnungen", base / "eingang/rechnungen")),
+        eingang_dokumente=Path(ein.get("dokumente", base / "eingang/dokumente")),
+        fehler=Path(ein.get("fehler", base / "fehler")),
         arbeit=base / "arbeit",
         zustand=base / "zustand",
-        ausgang_rechnungsdaten=Path(_req(d, "ausgang.rechnungsdaten")),
+        ausgang_rechnungsdaten=Path(aus.get("rechnungsdaten", base / "ausgang/rechnungsdaten")),
         tags_rechnung=_str_list(_req(d, "tags.rechnung"), "tags.rechnung"),
         tags_dokument=_str_list(tags.get("dokument", []), "tags.dokument"),
         tag_pruefen=str(tags.get("pruefen") or "").strip(),
@@ -205,6 +217,7 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
         nuextract_eingabe=str(mod.get("nuextract_eingabe", "bild")),
         nuextract_seiten=int(mod.get("nuextract_seiten", 3)),
         kategorie_tags=kategorie_tags,
+        betriebsart=betriebsart,
     )
     if not testlauf and (not cfg.empfaenger or cfg.empfaenger.lower().startswith("muster")):
         raise ConfigError("empfaenger ist noch der Platzhalter – bitte den Namen der eigenen Organisation eintragen")
@@ -213,6 +226,16 @@ def load(path: str | Path = DEFAULT_PATH, read_token: bool = True, testlauf: boo
     # Tag "noch zu buchen" (optional): gehoert zu jedem als Rechnung/Beleg verarbeiteten Dokument
     if cfg.tag_zu_buchen and cfg.tag_zu_buchen.lower() not in {t.lower() for t in cfg.tags_rechnung}:
         cfg.tags_rechnung.append(cfg.tag_zu_buchen)
+    if cfg.zustandslos:
+        # E61: alles liegt in paperless – der Sidecar als Feld am Dokument, kein Ausgangsordner, keine Einlieferung
+        if "sidecar" not in cfg.felder:
+            raise ConfigError("betriebsart 'paperless' braucht felder.sidecar (Feld fuer den Sidecar, z.B. "
+                              "\"Erkannt: Sidecar\", Datentyp langer Text)")
+        if d.get("kumero"):
+            raise ConfigError("betriebsart 'paperless': nopaper liefert nicht an kumero ein – kumero holt den "
+                              "Sidecar aus dem Feld in paperless. Abschnitt kumero entfernen.")
+    elif "sidecar" in cfg.felder:
+        raise ConfigError("felder.sidecar gibt es nur in der betriebsart 'paperless'")
     # Einlieferung an die Buchhaltung kumero (optional, E56)
     k = d.get("kumero")
     if k is not None:

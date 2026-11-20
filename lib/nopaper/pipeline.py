@@ -134,20 +134,43 @@ def datei_hashes(p: Path) -> tuple[str, str]:
     return sha.hexdigest(), md5.hexdigest()
 
 
+class Merker:
+    """Betriebsart "paperless" (E61): nopaper haelt nichts auf der Platte. Was offen ist, sagt der
+    Ausloeser-Tag in paperless. Hier stehen nur Versuchszaehler und Wartezeiten – im Arbeitsspeicher,
+    nach einem Neustart beginnt die Zaehlung von vorn."""
+    def __init__(self):
+        self._nach: dict[int, dict] = {}
+
+    def nach(self, doc_id: int):
+        return self._nach.get(doc_id)
+
+    def nach_setzen(self, doc_id: int, versuche: int, nicht_vor: float, fehler: str | None) -> None:
+        self._nach[doc_id] = {"versuche": versuche, "nicht_vor": nicht_vor, "fehler": fehler}
+
+    def nach_loeschen(self, doc_id: int) -> None:
+        self._nach.pop(doc_id, None)
+
+
 class Nopaper:
     def __init__(self, cfg: Config, pl: Paperless | None = None, ki: llm.Ollama | None = None,
                  state: State | None = None, ocr_text=None, seite_als_bild=None, zweite_lesung=None):
         self.cfg = cfg
         self.pl = pl or Paperless(cfg.paperless_url, cfg.token, cfg.ca_datei)
         self.ki = ki or llm.Ollama(cfg.ollama_url, cfg.num_ctx, cfg.ollama_timeout)
-        self.state = state or State(cfg.zustand / "nopaper.db")
-        self.kumero = Kumero(cfg, self.state) if cfg.kumero_url else None
+        if cfg.zustandslos:
+            self.state = state or Merker()
+            self.kumero = None
+        else:
+            self.state = state or State(cfg.zustand / "nopaper.db")
+            self.kumero = Kumero(cfg, self.state) if cfg.kumero_url else None
         self.ocr_text = ocr_text or ocr.ocr_text
         self.seite_als_bild = seite_als_bild or ocr.seite_als_bild
         self.zweite_lesung = zweite_lesung or ocr.zweite_lesung
         self._ids_ok = False
         self._letzte_abfrage = 0.0
-        for d in (cfg.arbeit, cfg.fehler, cfg.ausgang_rechnungsdaten, cfg.zustand):
+        # zustandslos: nur das Arbeitsverzeichnis fuer kurzlebige Dateien eines Durchlaufs
+        for d in ((cfg.arbeit,) if cfg.zustandslos else
+                  (cfg.arbeit, cfg.fehler, cfg.ausgang_rechnungsdaten, cfg.zustand)):
             d.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ IDs aus paperless
@@ -280,9 +303,16 @@ class Nopaper:
 
     def _sidecar(self, doc_id: int, inv: dict, issues: list[str], notes: list[str], quelle: str,
                  sha_o: str, sha_a: str | None, methode: str, modell: str, md5_o: str | None = None) -> None:
+        xml = self._sidecar_xml(doc_id, inv, issues, notes, quelle, sha_o, sha_a, methode, modell, md5_o)
+        if xml is not None:
+            invoice.atomic_write(self.cfg.ausgang_rechnungsdaten / f"{doc_id:07d}.xml", xml)
+
+    def _sidecar_xml(self, doc_id: int, inv: dict, issues: list[str], notes: list[str], quelle: str,
+                     sha_o: str, sha_a: str | None, methode: str, modell: str,
+                     md5_o: str | None = None) -> bytes | None:
         status = "ok" if not issues else "pruefen"
         if status != "ok" and not self.cfg.sidecar_bei_pruefen:
-            return
+            return None
         prov = {
             "paperless-document-id": doc_id,
             "paperless-url": f"{self.cfg.paperless_url}/documents/{doc_id}/details",
@@ -299,8 +329,28 @@ class Nopaper:
             "pruefhinweise": ",".join(issues + notes),
             "hinweis": SIDECAR_HINWEIS,
         }
-        invoice.atomic_write(self.cfg.ausgang_rechnungsdaten / f"{doc_id:07d}.xml",
-                             invoice.build_cii(inv, prov))
+        return invoice.build_cii(inv, prov)
+
+    def _duplikat(self, inv: dict, doc_id: int) -> int | None:
+        """Gleicher Absender und gleiche Rechnungsnummer schon vorhanden? Liefert die ID des anderen Dokuments.
+        Scanner-Betrieb: eigener Index (nur Hashes). Zustandslos: Abfrage der Erkannt-Felder in paperless."""
+        if not inv["invoice_number"]:
+            return None
+        if not self.cfg.zustandslos:
+            absender = inv["seller"]["vat_id"] or inv["seller"]["tax_number"] or inv["seller"]["name"] or ""
+            return self.state.duplikat(absender, inv["invoice_number"], doc_id)
+        f_nr, f_st = self.felder.get("rechnungsnummer"), self.felder.get("rechnungssteller")
+        name = inv["seller"]["name"]
+        if not (f_nr and f_st and name):
+            return None   # ohne beide Felder ist ein Duplikat in paperless nicht erkennbar
+        try:
+            andere = [i for i in self.pl.mit_feldwerten([(f_nr[0], inv["invoice_number"]), (f_st[0], name)])
+                      if i != doc_id]
+        except PaperlessFehler as e:
+            # aeltere paperless-Fassung ohne Feldabfrage: Duplikatsuche auslassen, Beleg nicht aufhalten
+            log.warning("duplikatsuche in paperless nicht moeglich (%s)", e.code)
+            return None
+        return min(andere) if andere else None
 
     def _archiv_sha(self, doc_id: int, meta: dict) -> str | None:
         if not meta.get("has_archive_version"):
@@ -370,11 +420,9 @@ class Nopaper:
             tags |= set(self.tag_kategorie.get(kat, []))
             patch: dict = {"content": text or doc.get("content", "")}
             if ist_rechnung:
-                if inv["invoice_number"]:
-                    absender = inv["seller"]["vat_id"] or inv["seller"]["tax_number"] or inv["seller"]["name"] or ""
-                    prev = self.state.duplikat(absender, inv["invoice_number"], doc_id)
-                    if prev is not None:
-                        issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
+                prev = self._duplikat(inv, doc_id)
+                if prev is not None:
+                    issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
                 status = "ok" if not issues else "pruefen"
                 patch["custom_fields"] = self._felder_mischen(doc.get("custom_fields"),
                                                               self._feldwerte(inv, status))
@@ -426,11 +474,9 @@ class Nopaper:
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
             inv, issues, notes, methode, modell = self._rechnung_auslesen(original, roh, workdir,
                                                                           kategorie="rechnung")
-            if inv["invoice_number"]:
-                absender = inv["seller"]["vat_id"] or inv["seller"]["tax_number"] or inv["seller"]["name"] or ""
-                prev = self.state.duplikat(absender, inv["invoice_number"], doc_id)
-                if prev is not None:
-                    issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
+            prev = self._duplikat(inv, doc_id)
+            if prev is not None:
+                issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
             status = "ok" if not issues else "pruefen"
             sha_a = self._archiv_sha(doc_id, meta)
 
@@ -450,9 +496,20 @@ class Nopaper:
             neuer_titel = invoice.titel(inv, self.cfg.titel_rechnung)
             if neuer_titel:
                 aenderung["title"] = neuer_titel
-            self.pl.aendern(doc_id, aenderung)
-            self._sidecar(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a, methode, modell,
-                          md5_o)
+            if c.zustandslos:
+                # E61: Volltext, Tags, Felder, Titel und Sidecar in EINEM Aufruf – entweder alles steht in
+                # paperless und der Ausloeser ist weg, oder nichts und der Ausloeser bleibt.
+                xml = self._sidecar_xml(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a,
+                                        methode, modell, md5_o)
+                if xml is not None:
+                    fid = self.felder["sidecar"][0]
+                    aenderung["custom_fields"] = [f for f in aenderung["custom_fields"] if f["field"] != fid] + [
+                        {"field": fid, "value": xml.decode("utf-8")}]
+                self.pl.aendern(doc_id, aenderung)
+            else:
+                self.pl.aendern(doc_id, aenderung)
+                self._sidecar(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a, methode,
+                              modell, md5_o)
         log.info("nachbearbeitung doc=%s status=%s codes=%s dauer=%.0fs", doc_id, status,
                  ",".join(issues + notes + codes) or "-", time.monotonic() - t0)
         return status
@@ -577,6 +634,12 @@ class Nopaper:
             return 0
 
     def ein_durchlauf(self) -> None:
+        if self.cfg.zustandslos:
+            # E61: kein Eingangsordner, keine Einlieferung – nur die Ausloeser-Tags in paperless
+            if time.time() - self._letzte_abfrage >= self.cfg.abfrage_intervall_s:
+                self._letzte_abfrage = time.time()
+                self.nachbearbeitung_abfragen()
+            return
         self.sidecars_zustellen()
         self.eingang_scannen()
         self.eingang_abarbeiten()
@@ -586,7 +649,8 @@ class Nopaper:
         self.sidecars_zustellen()
 
     def laufen(self) -> None:
-        log.info("nopaper %s gestartet (extraktion=%s/%s, bild=%s, glaettung=%s)", VERSION, self.cfg.extraktor,
+        log.info("nopaper %s gestartet (betriebsart=%s, extraktion=%s/%s, bild=%s, glaettung=%s)", VERSION,
+                 self.cfg.betriebsart, self.cfg.extraktor,
                  extraktions_modell(self.cfg), self.cfg.modell_bild or "-",
                  self.cfg.modell_glaettung or self.cfg.modell_text)
         while True:
