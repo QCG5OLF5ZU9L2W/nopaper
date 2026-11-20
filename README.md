@@ -331,6 +331,17 @@ Die Positionen ändern weder die Kopfdaten noch den Prüfstatus des Belegs. nopa
 
 **Datenschutz:** Positionen können Angaben über Personen enthalten, etwa Laborleistungen. Deshalb ist die Funktion abgeschaltet, bis sie bewusst eingeschaltet wird.
 
+## Mahnungen und Zahlungsberichte
+
+Beides sind keine Rechnungen: Sie bekommen keine Rechnungs-Tags und keinen Sidecar, aber die Angaben, die man zum Arbeiten braucht.
+
+| Belegart | Felder | Titel |
+|---|---|---|
+| `mahnung` | Absender, Datum, Zahlbetrag, IBAN, Verwendungszweck | `Datum Absender Mahnung Betrag` |
+| `zahlungsbericht` (Zahlungsdienstleister, Kartenterminal) | Absender, Datum, verarbeitete Zahlungen in `brutto`, Gebühren in `gebuehren`, ausgezahlter Betrag in `zahlbetrag` | `Datum Absender Zahlungsbericht Betrag` |
+
+Das Feld für die Gebühren ist optional: in paperless ein Feld vom Typ Geldbetrag anlegen (z. B. „Erkannt: Gebühren“) und unter `felder` als `gebuehren` eintragen. Eigene Tags vergibt `kategorie_tags`, zum Beispiel `"mahnung": ["Mahnung"], "zahlungsbericht": ["Zahlungsbericht"]`.
+
 ## Aktenzeichen als Tag
 
 Sind die Aktenzeichen in paperless als Tags angelegt, ordnet nopaper sie zu. Dafür in der Konfiguration unter `tags` eintragen:
