@@ -27,6 +27,9 @@ _AZ = re.compile(
     r"(?:\bAz\.?|\bAktenzeichen|\bGesch(?:ä|ae)fts(?:zeichen|nummer|-?\s?Nr\.?))\s*:?\s*"
     r"(?P<az>[0-9A-Za-z][0-9A-Za-z .\-]{0,28}?\s?/\s?\d{2,4}(?:\s[A-Z]{1,4}\b)?)")
 
+# Formulierungen, die bei einer Verlegung den NEUEN Termin einleiten (E71)
+_NEU = re.compile(r"verlegt(?:\s+worden)?\s+auf|neuer\s+termin|nunmehr\s+(?:auf|am|f[üu]r)", re.I)
+NEU_VOR = 80          # so nah vor dem Datum muss die Formulierung stehen
 VOR, NACH = 220, 80   # Zeichen vor dem Datum (Stichwort) und nach dem Datum (Uhrzeit)
 
 
@@ -68,7 +71,8 @@ def kandidaten(text: str) -> list[dict]:
         zeit = f"{int(z.group('h')):02d}:{z.group('min') or '00'} Uhr"
         s = _SAAL.search(text[m.end() + z.end():m.end() + z.end() + NACH])
         saal = re.sub(r"\s+", " ", s.group(0)).rstrip(".,;") if s else ""
-        out.append({"datum": d, "zeit": zeit + (f", {saal}" if saal else "")})
+        neu = _NEU.search(text[max(0, m.start() - NEU_VOR):m.start()]) is not None
+        out.append({"datum": d, "zeit": zeit + (f", {saal}" if saal else ""), "neu": neu})
     return out
 
 
@@ -112,7 +116,8 @@ def aktenzeichen_tags(text: str, tags: dict[str, int]) -> tuple[list[int], bool]
 
 def erkennen(text: str) -> tuple[dict, list[str]]:
     """Liefert ({termin: date, terminzeit: str, aktenzeichen: str}, Codes). Leer, wenn das Schreiben keine
-    Ladung ist. Codes: TERMIN_ERKANNT | TERMIN_NICHT_ERKANNT | TERMIN_MEHRDEUTIG (die letzten beiden
+    Ladung ist. Codes: TERMIN_ERKANNT (bei einer Verlegung zusaetzlich TERMIN_VERLEGT) | TERMIN_NICHT_ERKANNT |
+    TERMIN_MEHRDEUTIG (die letzten beiden
     bedeuten: Ladung, aber kein sicherer Termin -> ein Mensch muss hinsehen)."""
     if not ist_ladung(text):
         return {}, []
@@ -124,11 +129,17 @@ def erkennen(text: str) -> tuple[dict, list[str]]:
     tage = {k["datum"] for k in kand}
     if not tage:
         return werte, ["TERMIN_NICHT_ERKANNT"]
+    codes = ["TERMIN_ERKANNT"]
     if len(tage) > 1:
-        # z.B. Umladung: alter und neuer Termin stehen beide da – nicht raten
-        return werte, ["TERMIN_MEHRDEUTIG"]
+        # Verlegung: alter und neuer Termin stehen beide da. Es zaehlt der, den das Schreiben selbst als
+        # neuen bezeichnet ("verlegt auf", "neuer Termin", "nunmehr auf"). Ohne diese Angabe nicht raten.
+        neue = {k["datum"] for k in kand if k["neu"]}
+        if len(neue) != 1:
+            return werte, ["TERMIN_MEHRDEUTIG"]
+        kand = [k for k in kand if k["datum"] in neue]
+        codes.append("TERMIN_VERLEGT")
     werte["termin"] = kand[0]["datum"]
     zeiten = {k["zeit"] for k in kand}
     if len(zeiten) == 1 or len({z.split(",")[0] for z in zeiten}) == 1:
         werte["terminzeit"] = max(zeiten, key=len)
-    return werte, ["TERMIN_ERKANNT"]
+    return werte, codes

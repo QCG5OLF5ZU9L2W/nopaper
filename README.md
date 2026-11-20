@@ -283,7 +283,7 @@ Trägt ein Dokument den Tag aus `tags.ausloeser_text` und ist es eine gerichtlic
 | `terminzeit` | Text | Uhrzeit und Saal, z. B. „11:00 Uhr, Sitzungssaal V“ |
 | `aktenzeichen` | Text | Aktenzeichen des Gerichts (nicht nötig, wenn Aktenzeichen Tags sind, siehe unten) |
 
-Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das bei „Termin“, „Verhandlung“, „geladen“ oder „anberaumt“ steht und dem eine Uhrzeit folgt. Ist der Termin nicht sicher lesbar oder stehen mehrere im Text (etwa bei einer Umladung), bleiben die Felder leer und das Dokument bekommt den Prüf-Tag.
+Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das bei „Termin“, „Verhandlung“, „geladen“ oder „anberaumt“ steht und dem eine Uhrzeit folgt. Bei einer Terminverlegung kommt der neue Termin ins Feld, wenn das Schreiben ihn so bezeichnet („verlegt auf“, „neuer Termin“, „nunmehr auf“). Ist der Termin nicht sicher lesbar oder steht nicht eindeutig da, welcher von mehreren gilt, bleiben die Felder leer und das Dokument bekommt den Prüf-Tag.
 
 Das Feld ist eine Arbeitshilfe und ersetzt keine Fristenkontrolle: Liest die Texterkennung eine Ziffer falsch, steht der falsche Tag im Feld. Maßgeblich ist die Ladung selbst.
 

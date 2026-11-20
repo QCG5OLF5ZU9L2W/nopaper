@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.5
+
+- **Terminverlegung** (E71): Nennt ein Schreiben den alten und den neuen Termin, kommt der neue ins Feld, wenn das Schreiben ihn selbst so bezeichnet („verlegt auf“, „verlegt worden auf“, „neuer Termin“, „nunmehr auf“). Im Protokoll steht zusätzlich `TERMIN_VERLEGT`. Bisher blieben die Felder bei jeder Verlegung leer.
+- Steht nicht eindeutig da, welcher Termin gilt, bleibt es bei leeren Feldern und Prüf-Tag.
+
 ## 1.8.4
 
 - **Mehrere Aktenzeichen in einem Dokument** (ändert E70): Stehen mehrere Aktenzeichen mit eigenem Tag im Text, etwa das der Vorinstanz und das des Rechtsmittels, ordnet nopaper alle zu. Bisher wurde in diesem Fall keines zugeordnet. Im Protokoll steht `AKTENZEICHEN_ZUGEORDNET_<Anzahl>`.
