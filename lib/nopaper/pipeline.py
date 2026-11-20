@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -27,7 +28,7 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
                  "GLAETTUNG_VERWORFEN", "SUMMEN_AUS_AUFSCHLUESSELUNG", "EINORDNUNG_UEBERSTIMMT",
                  "BRUTTO_AUS_AUFSCHLUESSELUNG", "UST_NULLSATZ_KORRIGIERT", "UST_SATZ_BERECHNET",
                  "BEFREIUNGSGRUND_ERSETZT", "STEUERNUMMER_VERWORFEN", "RECHNUNGSNUMMER_VERWORFEN", "RUECKGELD_ERKANNT", "VERWENDUNGSZWECK_VERWORFEN", "VERWENDUNGSZWECK_AUS_TEXT", "RECHNUNGSNUMMER_ABWEICHEND", "ZAHLUNG_AUS_TEXT", "FAELLIGKEIT_BERECHNET", "SKONTO_VERWORFEN", "ZWEITE_LESUNG", "GLAETTUNG_UEBERSPRUNGEN",
-                 "VERSICHERUNGSTEUER_KORRIGIERT"}
+                 "VERSICHERUNGSTEUER_KORRIGIERT", "RECHNUNGSNUMMER_AUS_BILD", "RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN"}
 TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
 # Fehler, die ein neuer Versuch nicht behebt: sofort Ausloeser entfernen und Pruef-Tag setzen
 ENDGUELTIG = ("FORMAT_NICHT_UNTERSTUETZT", "KEIN_OCR_TEXT")
@@ -61,6 +62,35 @@ def analyse(c: Config, ki: llm.Ollama, roh: str, original: Path | None = None,
             return llm.analysieren_nuextract(ki, c.modell_extraktion, bilder=bilder)
         return llm.analysieren_nuextract(ki, c.modell_extraktion, text=text_ki or roh)
     return llm.analysieren(ki, c.modell_text, text_ki or roh)
+
+
+def _nr(s) -> str:
+    return re.sub(r"[\s.]+", "", s or "").upper()
+
+
+def nummer_aus_bild(inv: dict, issues: list[str], notes: list[str], nr_erst, erst_bild: bool, nr_bild,
+                    beleg: str) -> None:
+    """Von Hand eingetragene Rechnungsnummer (E64). Die Texterkennung liest Handschrift nicht, die Nummer
+    kann also nie im Text verankert werden. Steht im Text eine Bezeichnung ("RE-Nr."), gilt:
+    - fehlt die Nummer bisher und das Bildmodell liest eine: uebernehmen, aber der Beleg geht in die
+      Pruefung (eine einzelne Lesung von Handschrift ist nicht sicher genug);
+    - lesen zwei verschiedene Bildmodelle unabhaengig dieselbe Nummer: sie gilt als belegt.
+    Weicht eine gedruckte Nummer im Text nur in einer Ziffer ab, bleibt es bei E46 (Pruefung)."""
+    if not nr_bild or not invoice.rechnungsnummer_bezeichnet(beleg):
+        return
+    if _nr(nr_bild) in re.sub(r"\s+", "", beleg).upper():
+        return                                    # steht gedruckt im Text: gewoehnliche Verankerung
+    if invoice.nummer_hat_belegbezeichnung(nr_bild, beleg, abweichung=1):
+        return
+    if not inv["invoice_number"]:
+        inv["invoice_number"] = nr_bild
+        issues[:] = [i for i in issues if i != "FEHLT_RECHNUNGSNUMMER"]
+        if "RECHNUNGSNUMMER_NICHT_IM_TEXT" not in issues:
+            issues.append("RECHNUNGSNUMMER_NICHT_IM_TEXT")
+        notes.append("RECHNUNGSNUMMER_AUS_BILD")
+    if erst_bild and nr_erst and _nr(nr_erst) == _nr(nr_bild) == _nr(inv["invoice_number"]):
+        issues[:] = [i for i in issues if i != "RECHNUNGSNUMMER_NICHT_IM_TEXT"]
+        notes.append("RECHNUNGSNUMMER_ZWEI_BILDLESUNGEN")
 
 
 def extraktions_modell(c: Config) -> str:
@@ -100,15 +130,22 @@ def rechnung_auslesen(c: Config, ki: llm.Ollama, seite_als_bild, original: Path,
             beleg = text + "\f" + zweit
             inv, issues, notes = auswerten(raw, beleg)
             notes.append("ZWEITE_LESUNG")
-    if rot(issues) and c.modell_bild:
+    # Bezeichnung "RE-Nr." im Text, aber keine Nummer gelesen: vermutlich von Hand eingetragen (E64)
+    ist_scan = original.suffix.lower() == ".pdf" and not ocr.ist_digital(original)
+    nummer_fehlt = (invoice.ist_rechnungsartig(inv["kategorie"]) and not inv["invoice_number"] and ist_scan
+                    and invoice.rechnungsnummer_bezeichnet(beleg))
+    if (rot(issues) or nummer_fehlt) and c.modell_bild:
         try:
             bild = seite_als_bild(original, workdir)
             raw2 = llm.rechnungsdaten_bild(ki, c.modell_bild, bild)
             raw2["kategorie"] = inv["kategorie"]
             inv2, issues2, notes2 = auswerten(raw2, beleg)
+            nr_erst, erst_bild = inv["invoice_number"], methode == "bild"
             if len(rot(issues2)) < len(rot(issues)):
                 inv, notes, issues = inv2, notes2 + ["BILDMODELL_VERWENDET"], issues2
                 methode, modell = "bild", c.modell_bild
+            if ist_scan:
+                nummer_aus_bild(inv, issues, notes, nr_erst, erst_bild, inv2["invoice_number"], beleg)
         except ocr.OcrError as e:
             log.warning("bild-rueckfall nicht moeglich (%s)", e)
     if "ZWEITE_LESUNG" not in notes and beleg is not text:

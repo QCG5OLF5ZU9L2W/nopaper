@@ -307,6 +307,7 @@ kassenbon (Supermarkt, Tankstelle, Post), bewirtung (Restaurant), versicherung (
 Bei mahnung, bestellbestaetigung, buchungsbestaetigung, lieferschein, brief, sonstiges alle anderen Felder leer.
 seller ist der Rechnungssteller, nie der Empfaenger. Eingangsstempel ignorieren; massgeblich ist das gedruckte Datum.
 invoice_number: Rechnungs-, Beleg- oder Bonnummer - nicht Kunden-, Auftrags-, Steuer-, Terminal- oder Kassennummer.
+Auch eine von Hand eingetragene Nummer (z.B. hinter "RE-Nr. ......") uebernehmen, genau wie geschrieben.
 tax_number = Steuernummer (St.-Nr.), vat_id = USt-IdNr.
 Betraege mit dem gedruckten Vorzeichen: steht ein Minus davor oder dahinter (Auszahlung, z.B. Pfandrueckgabe
 groesser als der Einkauf, "zu zahlen -0,77"), sind gross_total, net_total, tax_total und vat_breakdown negativ.

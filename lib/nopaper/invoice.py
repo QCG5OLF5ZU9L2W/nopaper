@@ -204,6 +204,7 @@ Regeln fuer die Rechnungsdaten:
   Pfandrueckgabe groesser als der Einkauf: "zu zahlen -0,77"), ist der Betrag negativ: gross_total -0.77,
   ebenso net_total, tax_total und die Zeilen in vat_breakdown.
 - seller ist der Rechnungssteller (Absender), nie der Empfaenger.
+- invoice_number auch dann uebernehmen, wenn sie von Hand eingetragen ist (z.B. hinter "RE-Nr. ......").
 - tax_number ist die Steuernummer (auch "St.-Nr.", "Steuer-Nr."), vat_id die USt-IdNr. ("USt-ID", "Ust.-IdNr."),
   Leerzeichen darin entfernen.
 - totals.gross_total ist der Endbetrag ("Rechnungsbetrag", "Endbetrag", "Gesamtbetrag", "zu zahlen", "Total"),
@@ -789,6 +790,17 @@ def nummer_hat_belegbezeichnung(nummer: str, text: str, abweichung: int = 0) -> 
         if _BELEG_LABEL.search(vor) and not re.search(r"steuer|ust|st\.?-?nr", vor, re.I):
             return True
     return False
+
+
+_RECHNUNGSNR_LABEL = re.compile(
+    r"\bRE\.?\s?-?\s?Nr\b|\bRg\.?\s?-?\s?Nr\b|\bRechn(?:ungs?)?\.?\s?-?\s?(?:Nr\b|Nummer|No\b)|"
+    r"\bRechnungsnummer|\bBeleg\s?-?\s?(?:Nr\b|Nummer)|\bInvoice\s(?:No\b|Number)", re.I)
+
+
+def rechnungsnummer_bezeichnet(text: str) -> bool:
+    """True, wenn im Text eine Bezeichnung fuer die Rechnungsnummer steht ("RE-Nr.", "Rechnungs-Nr.",
+    "Rechnungsnummer", "Beleg-Nr.") – auch wenn dahinter nichts Lesbares folgt (Nummer von Hand eingetragen)."""
+    return _RECHNUNGSNR_LABEL.search(text) is not None
 
 
 def _tage_im_text(tage: int, text: str) -> bool:

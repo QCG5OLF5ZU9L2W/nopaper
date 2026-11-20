@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.7.2
+
+- **Von Hand eingetragene Rechnungsnummer** (E64): Steht auf einem Scan eine Bezeichnung wie „RE-Nr.“ und hat die erste Lesung keine Nummer gefunden, fragt nopaper das Bildmodell. Liest nur dieses eine Nummer, kommt sie ins Feld und der Beleg in die Prüfung. Lesen NuExtract und das Rückfall-Bildmodell dieselbe Nummer, gilt sie als belegt.
+- Beide Prompts weisen jetzt darauf hin, handschriftliche Nummern zu übernehmen. Musterbelege neu messen.
+- Ob die Modelle die Handschrift tatsächlich lesen, ist nicht gemessen.
+
 ## 1.7.1
 
 - **Der Rechnungs-Auslöser erzwingt keine Rechnung mehr** (E63): Ist ein Dokument mit dem Tag aus `tags.ausloeser_nachbearbeitung` laut Modell keine Rechnung, entfernt nopaper den Auslöser, setzt den Prüf-Tag und macht mit dem nächsten Dokument weiter. Sonst wird nichts geschrieben. Von Hand erzwingen lässt es sich weiterhin mit `nopaper nachbearbeiten <id>`.
