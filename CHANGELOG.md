@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.6
+
+- **`nopaper check` prüft die Datentypen der Felder:** Hat ein Feld in paperless einen anderen Datentyp, als nopaper schreibt (etwa Text statt Datum), meldet `check` das als Fehler. Bisher fiel das erst beim Schreiben auf, mit `PAPERLESS_HTTP_400`.
+- **Lehnt paperless eine Änderung mit HTTP 400 ab,** steht im Protokoll, welchen Teil es beanstandet (zum Beispiel `custom_fields`). Protokolliert werden nur die Namen der API-Felder, nie die Meldungstexte, weil die den abgelehnten Wert enthalten können.
+
 ## 1.8.5
 
 - **Terminverlegung** (E71): Nennt ein Schreiben den alten und den neuen Termin, kommt der neue ins Feld, wenn das Schreiben ihn selbst so bezeichnet („verlegt auf“, „verlegt worden auf“, „neuer Termin“, „nunmehr auf“). Im Protokoll steht zusätzlich `TERMIN_VERLEGT`. Bisher blieben die Felder bei jeder Verlegung leer.

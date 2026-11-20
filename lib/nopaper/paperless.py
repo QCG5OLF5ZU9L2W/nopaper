@@ -28,6 +28,28 @@ class PaperlessFehler(Exception):
         self.detail = detail
 
 
+def _fehlerschluessel(roh: bytes) -> str:
+    """Aus der Fehlerantwort von paperless nur die Namen der beanstandeten API-Felder (z.B. custom_fields),
+    niemals die Meldungstexte: Die koennen den abgelehnten Wert enthalten."""
+    try:
+        d = json.loads(roh.decode("utf-8", "replace"))
+    except ValueError:
+        return ""
+    namen: list[str] = []
+
+    def sammeln(x) -> None:
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if isinstance(k, str) and re.fullmatch(r"[a-z_]{1,40}", k) and k not in namen:
+                    namen.append(k)
+                sammeln(v)
+        elif isinstance(x, list):
+            for v in x:
+                sammeln(v)
+    sammeln(d)
+    return ",".join(namen[:6])
+
+
 class Paperless:
     def __init__(self, url: str, token: str, ca_datei: str | None = None, timeout: int = 60):
         self.url = url.rstrip("/")
@@ -53,7 +75,8 @@ class Paperless:
                 raise PaperlessFehler("PAPERLESS_KEINE_BERECHTIGUNG", f"{method} {path.split('?')[0]}") from e
             if e.code == 404:
                 raise PaperlessFehler("PAPERLESS_NICHT_GEFUNDEN", path.split("?")[0]) from e
-            raise PaperlessFehler(f"PAPERLESS_HTTP_{e.code}", path.split("?")[0]) from e
+            felder = _fehlerschluessel(e.read()) if e.code == 400 else ""
+            raise PaperlessFehler(f"PAPERLESS_HTTP_{e.code}", felder or path.split("?")[0]) from e
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             raise Voruebergehend(type(e).__name__) from e
 
