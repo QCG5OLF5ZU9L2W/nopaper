@@ -211,7 +211,7 @@ def glaetten_wenn_noetig(c: Config, ki: llm.Ollama, original: Path, roh: str) ->
     # kann neben dem Auslese-Modell geladen bleiben. Teilt es sich das Modell mit einer anderen Aufgabe, bleibt
     # der Kontext gleich, weil Ollama ein Modell bei anderem Kontext neu laedt.
     eigen = modell not in (c.modell_text, c.modell_bild, extraktions_modell(c))
-    return llm.glaetten(ki, modell, roh, num_ctx=min(llm.GLAETTUNG_KONTEXT, c.num_ctx) if eigen else None)
+    return llm.glaetten(ki, modell, roh, num_ctx=min(llm.GLAETTUNG_KONTEXT if eigen else llm.STUFEN[0], c.num_ctx))
 
 
 def pruefsumme_passt(paperless_wert, sha256: str, md5: str) -> bool:

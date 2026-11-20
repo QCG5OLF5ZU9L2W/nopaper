@@ -1112,7 +1112,7 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(p.pruefen([], inv, text), ("keine", None, ["POSITIONEN_NICHT_GELESEN"]))
 
     def test_glaettung_mit_kleinem_kontext(self):
-        # eigenes Glaettungsmodell: kleiner Kontext; die uebrigen Aufrufe behalten modelle.kontext
+        # eigenes Glaettungsmodell: 4.096; die uebrigen Aufrufe die Stufe, die das Dokument braucht
         d = json.loads((self.tmp / "config.json").read_text())
         d["modelle"]["kontext"] = 16384
         d["modelle"]["glaettung"] = "klein:4b"
@@ -1123,9 +1123,9 @@ class NopaperTest(unittest.TestCase):
         np.ein_durchlauf()
         glatt = {k for m, s, k in W.kontexte if s.startswith("Du korrigierst")}
         rest = {k for m, s, k in W.kontexte if not s.startswith("Du korrigierst")}
-        self.assertEqual((glatt, rest), ({4096}, {16384}))
+        self.assertEqual((glatt, rest), ({4096}, {8192}))      # kurzes Dokument: kleinste Stufe
 
-    def test_glaettung_teilt_modell_behaelt_kontext(self):
+    def test_glaettung_teilt_modell_gleiche_stufe(self):
         d = json.loads((self.tmp / "config.json").read_text())
         d["modelle"]["kontext"] = 16384
         d["modelle"].pop("glaettung", None)
@@ -1134,7 +1134,7 @@ class NopaperTest(unittest.TestCase):
         W.docs[94] = {"id": 94, "content": "", "tags": [5], "custom_fields": [], "owner": None,
                       "original": b"%PDF RECHNUNG ctx2", "archive": b"A"}
         np.ein_durchlauf()
-        self.assertEqual({k for m, s, k in W.kontexte}, {16384})
+        self.assertEqual({k for m, s, k in W.kontexte}, {8192})  # kein Neuladen: alle Aufrufe in derselben Stufe
 
     # ------------------------------------------------------------------ Vorlauf (E75)
     def test_vorlauf_mehrere_dokumente(self):
@@ -1924,16 +1924,26 @@ class RegelTest(unittest.TestCase):
 
     def test_analyse_bekommt_den_ganzen_text(self):
         from nopaper import llm
-        gesehen = []
+        gesehen, kontexte = [], []
 
         class Mitschnitt(llm.Ollama):
-            def chat_json(self, model, system, user, schema, images=None):
+            def chat_json(self, model, system, user, schema, images=None, num_ctx=None):
                 gesehen.append(user)
+                kontexte.append(num_ctx)
                 return {}
 
         lang = "RECHNUNG Nr. 4711\n" + "Artikel 0815 Muster 1,00 A\n" * 2000 + "Endbetrag 2.000,00 EUR\n"
         llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=65536), "m", lang)
         self.assertIn(lang, gesehen[-1])                       # grosser Kontext: alles
+        self.assertEqual(kontexte[-1], 65536)                  # ... und nur dann der grosse Kontext (E76)
+        llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=65536), "m", "RECHNUNG Nr. 4711\nEndbetrag 2,00 EUR\n")
+        self.assertEqual(kontexte[-1], 8192)                   # kurzes Dokument: kleinste Stufe
+        self.assertEqual([llm.kontext_stufe(b, 65536) for b in (1, 8192, 8193, 20000, 70000)],
+                         [8192, 8192, 16384, 32768, 65536])
+        self.assertEqual(llm.kontext_stufe(20000, 16384), 16384)     # nie mehr als modelle.kontext
+        self.assertEqual(llm.kontext_stufe(100, 4096), 4096)
+        self.assertEqual([llm.kontext_bilder(n, 65536) for n in (1, 3, 8)], [8192, 16384, 32768])
+        self.assertEqual(llm.kontext_bilder(3, 8192), 16384)         # Seitenbilder: mindestens 16.384 moeglich
         llm.analysieren(Mitschnitt("http://127.0.0.1:1", num_ctx=8192), "m", lang)
         self.assertIn("RECHNUNG Nr. 4711", gesehen[-1])        # kleiner Kontext: Anfang und Ende
         self.assertIn("Endbetrag 2.000,00 EUR", gesehen[-1])

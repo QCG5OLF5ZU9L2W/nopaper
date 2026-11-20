@@ -243,6 +243,26 @@ def text_fuer_modell(text: str, max_chars: int, anteil_ende: float = 0.4) -> str
 
 
 TOKEN_JE_SEITENBILD = 3500   # Seitenbild bei 170 dpi: ca. 2.500-3.500 Token
+STUFEN = (8192, 16384, 32768, 65536, 131072)
+
+
+def kontext_stufe(bedarf: int, hoechstens: int) -> int:
+    """Kontext fuer EINEN Aufruf (E76): die kleinste Stufe, in die der Bedarf passt, nie mehr als `hoechstens`
+    (modelle.kontext). Der Speicher, den Ollama fuer ein Modell belegt, waechst mit dem Kontext; mit festen
+    Stufen statt eines genauen Werts bleibt ein Modell geladen, solange die Dokumente aehnlich gross sind."""
+    for s in STUFEN:
+        if bedarf <= s:
+            return min(s, int(hoechstens))
+    return int(hoechstens)
+
+
+def kontext_text(zeichen: int, hoechstens: int) -> int:
+    """Stufe fuer einen Textaufruf: Umkehrung von text_budget (12.000 Zeichen je 8.192 Token)."""
+    return kontext_stufe(zeichen * BASIS_KONTEXT // BASIS_ZEICHEN, hoechstens)
+
+
+def kontext_bilder(anzahl: int, hoechstens: int) -> int:
+    return kontext_stufe(anzahl * TOKEN_JE_SEITENBILD + 2500, bild_kontext(hoechstens))
 
 
 def bild_kontext(num_ctx: int) -> int:
@@ -260,7 +280,7 @@ def analysieren(o: Ollama, model: str, text: str, max_chars: int | None = None) 
     text = text_fuer_modell(text, max_chars or text_budget(o.num_ctx))
     return o.chat_json(model, invoice.EXTRACT_PROMPT,
                        "OCR-Text des Dokuments:\n<<<\n" + text + "\n>>>",
-                       invoice.build_schema(False))
+                       invoice.build_schema(False), num_ctx=kontext_text(len(text), o.num_ctx))
 
 
 rechnungsdaten_text = analysieren
@@ -270,7 +290,7 @@ def rechnungsdaten_bild(o: Ollama, model: str, bild_b64: str) -> dict:
     return o.chat_json(model, invoice.EXTRACT_PROMPT,
                        "Lies die Kopfdaten aus diesem Bild der ersten Belegseite. Achte besonders auf "
                        "Summen, Steuersaetze, Datum und Steuernummer.",
-                       invoice.build_schema(False), images=[bild_b64])
+                       invoice.build_schema(False), images=[bild_b64], num_ctx=kontext_bilder(1, o.num_ctx))
 
 
 # --------------------------------------------------------------------------- NuExtract3 (numind)
@@ -348,7 +368,8 @@ def analysieren_nuextract(o: Ollama, model: str, text: str | None = None,
         user["images"] = bilder
     payload = {
         "model": model, "stream": False, "think": False,
-        "options": {"temperature": 0, "num_ctx": bild_kontext(o.num_ctx) if bilder else o.num_ctx},
+        "options": {"temperature": 0, "num_ctx": kontext_bilder(len(bilder), o.num_ctx) if bilder
+                    else kontext_text(len(user["content"]), o.num_ctx)},
         "messages": [
             {"role": "template", "content": json.dumps(NUEXTRACT_TEMPLATE, ensure_ascii=False, indent=2)},
             {"role": "instructions", "content": NUEXTRACT_INSTRUCTIONS},
