@@ -1302,6 +1302,22 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(_fehlerschluessel(antwort), "custom_fields,non_field_errors")
         self.assertEqual(_fehlerschluessel(b"<html>"), "")
 
+    def test_betrag_null_ist_kein_gelesener_betrag(self):
+        # E81: Uebersicht mit vielen Betraegen, das Modell liefert 0,00 (steht woertlich im Text): kein Titel
+        # "... 0,00 EUR", kein Sidecar, sondern Volltext-Weg mit Pruef-Tag
+        np = self.paperless_zuerst()
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e["totals"] = {"net_total": 0, "tax_total": None, "gross_total": 0, "prepaid": None, "amount_due": 0}
+        e["vat_breakdown"] = []
+        W.extraktion, W.einordnung = e, "gutschrift"
+        W.docs[86] = {"id": 86, "content": "", "title": "Scan_7", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG null", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual(self.tagnamen(86), {"nopaper prüfen"})
+        self.assertEqual(W.docs[86]["title"], "Scan_7")
+        self.assertIsNone(self.feld(86, "Erkannt: Sidecar"))
+        self.assertIsNone(self.feld(86, "Erkannt: Betrag brutto"))
+
     def test_beleg_ohne_lesbaren_betrag_geht_in_die_pruefung(self):
         # sieht nach Rechnung aus, aber der Betrag wurde nicht gelesen: Volltext-Weg MIT Pruef-Tag
         e = copy.deepcopy(LLM_RECHNUNG)

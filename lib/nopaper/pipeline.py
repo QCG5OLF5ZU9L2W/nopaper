@@ -664,7 +664,7 @@ class Nopaper:
             uhr.runde("lesen")
             kat = inv["kategorie"]
             kein_beleg = not invoice.ist_rechnungsartig(kat)
-            ohne_betrag = not kein_beleg and inv["gross"] is None
+            ohne_betrag = not kein_beleg and (inv["gross"] is None or inv["gross"] == 0)   # 0,00: E81
             if not erzwingen and (kein_beleg or ohne_betrag):
                 # E69: Der Ausloeser gilt fuer jedes Dokument. Was keine Rechnung ist – auch ein Schreiben eines
                 # Gerichts oder einer Behoerde ohne Betrag, etwa eine Ladung – nimmt den Volltext-Weg.
