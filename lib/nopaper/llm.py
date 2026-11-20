@@ -336,6 +336,8 @@ kategorie: rechnung (Lieferanten-/Dienstleisterrechnung, auch Webshop/Tickets mi
 kassenbon (Supermarkt, Tankstelle, Post), bewirtung (Restaurant), versicherung (Beitragsrechnung), behoerde
 (Kostenrechnung/Gebuehrenbescheid von Behoerde oder Gericht), mahnung, bestellbestaetigung, buchungsbestaetigung
 (Reise/Hotel ohne Rechnungsnummer), lieferschein (auch Packzettel, Wareneingangsformular), brief, sonstiges.
+gutschrift nur, wenn das Dokument sich selbst Gutschrift oder Rechnungskorrektur nennt. Zahlungs-, Auszahlungs- und
+Umsatzberichte von Zahlungsdienstleistern, Kontoauszuege und Abrechnungsuebersichten sind sonstiges.
 Bei bestellbestaetigung, buchungsbestaetigung, lieferschein, brief, sonstiges alle anderen Felder leer.
 Bei mahnung nur: seller (der Absender), issue_date (Datum des Schreibens), totals.amount_due (der insgesamt noch zu
 zahlende Betrag einschliesslich Mahngebuehr), payment.iban, payment.bic, payment.reference; alles andere leer.

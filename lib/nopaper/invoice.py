@@ -181,7 +181,9 @@ Gib ausschliesslich die Felder des vorgegebenen JSON-Schemas zurueck.
 
 kategorie:
 - "rechnung": Rechnung eines Lieferanten oder Dienstleisters (auch Honorar-, Arzt-, Labor-, Software-, Webshop-Rechnung)
-- "gutschrift": Gutschrift oder Rechnungskorrektur zu unseren Gunsten
+- "gutschrift": Gutschrift oder Rechnungskorrektur zu unseren Gunsten – nur, wenn das Dokument sich selbst so
+  nennt. Zahlungs-, Auszahlungs- und Umsatzberichte von Zahlungsdienstleistern (Kartenzahlungen, Gebuehren,
+  ausgezahlter Betrag), Kontoauszuege und Abrechnungsuebersichten sind KEINE Gutschrift, sondern "sonstiges"
 - "kassenbon": Kassenbon/Quittung (Supermarkt, Tankstelle, Post, Kartenzahlungsbeleg mit Warenliste)
 - "bewirtung": Restaurant-/Bewirtungsrechnung
 - "versicherung": Beitragsrechnung einer Versicherung
@@ -542,6 +544,9 @@ def validate(inv: dict, text: str, today: dt.date | None = None) -> list[str]:
         issues.append("FEHLT_RECHNUNGSDATUM")
     if inv["gross"] is None:
         issues.append("FEHLT_BRUTTO")
+    elif inv["gross"] == 0:
+        # E81: Ein Endbetrag von 0,00 ist fast immer falsch gelesen (irgendeine Null steht auf jedem Beleg)
+        issues.append("BRUTTO_NULL")
     if not inv["seller"]["name"]:
         issues.append("FEHLT_RECHNUNGSSTELLER")
     if not inv["buyer_name"] and not klein:

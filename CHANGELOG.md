@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.9
+
+- **Ein Betrag von 0,00 gilt nicht als gelesen** (E81): Liefert das Modell als Endbetrag 0,00, wird das Dokument nicht mehr als Rechnung über 0,00 EUR angelegt, sondern geht ohne Titel, Rechnungs-Tags und Sidecar in die Prüfung. Anlass: Zahlungsbericht eines Kartenzahlungsdienstes mit mehreren Beträgen; gelesen wurde die „0,00“ der Abzüge, und weil sie wörtlich im Text stand, galt der Beleg als in Ordnung.
+- **Zahlungs- und Auszahlungsberichte sind keine Gutschrift:** Beide Prompts stellen klar, dass „Gutschrift“ nur gilt, wenn das Dokument sich selbst so nennt.
+
 ## 1.9.8
 
 - **Codes lesen um ein Mehrfaches schneller** (E80): Die Seitenbilder für `zbarimg` werden unkomprimiert geschrieben (PGM statt PNG). Im Stapellauf lief dieser eine Schritt über 20 Sekunden je Dokument auf einem einzigen Kern, während Grafikkarte und die übrigen Kerne warteten. Kann `zbarimg` das Format nicht lesen, versucht nopaper es wie bisher mit PNG.
