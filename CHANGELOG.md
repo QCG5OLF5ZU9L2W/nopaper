@@ -2,6 +2,11 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.6
+
+- **Weniger Leerlauf der Grafikkarte zwischen den Modellaufrufen** (E78): Strich- und QR-Codes und die Tag-Liste für die Aktenzeichen holt nopaper jetzt schon im Vorlauf; die Prüfsumme der Archivfassung läuft nebenher, während das Modell weiterarbeitet.
+- **Zeiten je Schritt im Journal:** Die Abschlusszeile jedes Dokuments nennt jetzt, wie lange die Schritte gedauert haben, zum Beispiel `zeiten=vorlauf:4,lesen:9,positionen:0,glaetten:3,schreiben:1` (Sekunden). Damit ist sichtbar, wo die Zeit bleibt.
+
 ## 1.9.5
 
 - **Mahnungen** (E77): Eine Mahnung bekommt jetzt die Zahlungsangaben in die Felder – Belegart „mahnung“, Absender, Datum, Zahlbetrag, IBAN, Verwendungszweck – und den Titel `Datum Absender Mahnung Betrag`. Sie bekommt bewusst **keine** Rechnungs-Tags und **keinen** Sidecar, damit dieselbe Forderung nicht zweimal zum Buchen ansteht. Ist der Betrag nicht sicher gelesen, geht sie in die Prüfung.

@@ -41,6 +41,22 @@ VORLAUF = 2     # so viele Dokumente werden hoechstens im Voraus geholt und erka
 ENDGUELTIG = ("FORMAT_NICHT_UNTERSTUETZT", "KEIN_OCR_TEXT")
 
 
+class Stoppuhr:
+    """Dauer der Schritte eines Dokuments fuer das Protokoll (E78), z.B. 'vorlauf:4,lesen:9,glaetten:3,schreiben:1'."""
+
+    def __init__(self, **schon):
+        self.zeiten = {k: float(v) for k, v in schon.items()}
+        self._t = time.monotonic()
+
+    def runde(self, name: str) -> None:
+        jetzt = time.monotonic()
+        self.zeiten[name] = self.zeiten.get(name, 0.0) + jetzt - self._t
+        self._t = jetzt
+
+    def __str__(self) -> str:
+        return ",".join(f"{k}:{v:.0f}" for k, v in self.zeiten.items())
+
+
 def _endgueltig(code: str) -> bool:
     # paperless lehnt die Anfrage ab (400, 413, 422 ...): derselbe Inhalt wird wieder abgelehnt
     return code in ENDGUELTIG or (code.startswith("PAPERLESS_HTTP_4") and code != "PAPERLESS_HTTP_408")
@@ -270,6 +286,7 @@ class Nopaper:
         self.seite_als_bild = seite_als_bild or ocr.seite_als_bild
         self.zweite_lesung = zweite_lesung or ocr.zweite_lesung
         self.codes_lesen = codes_lesen or qr.lesen
+        self._neben = ThreadPoolExecutor(max_workers=1, thread_name_prefix="neben")   # Netzarbeit neben dem Modell
         self._ids_ok = False
         self._letzte_abfrage = 0.0
         # zustandslos: nur das Arbeitsverzeichnis fuer kurzlebige Dateien eines Durchlaufs
@@ -619,11 +636,14 @@ class Nopaper:
             roh = self.ocr_text(original, workdir, self.cfg.ocr_sprache)
             if not roh.strip():
                 raise PaperlessFehler("KEIN_OCR_TEXT")
+            # E78: alles, was kein Sprachmodell braucht, schon hier – die Grafikkarte wartet spaeter nicht darauf
+            gelesen = self.codes_lesen(original, workdir)
+            az = self.pl.tags_frisch() if self.cfg.tags_aktenzeichen else None
         except BaseException:
             tmp.cleanup()
             raise
         return {"tmp": tmp, "original": original, "meta": meta, "sha_o": sha_o, "md5_o": md5_o, "roh": roh,
-                "dauer": time.monotonic() - t}
+                "codes": gelesen, "az": az, "dauer": time.monotonic() - t}
 
     def nachbearbeiten(self, doc_id: int, erzwingen: bool = False, vorb: dict | None = None) -> str:
         """Dokument mit Rechnungs-Ausloeser als Rechnung auslesen. Ordnet das Modell es nicht als Rechnung
@@ -639,8 +659,10 @@ class Nopaper:
             doc = self.pl.dokument(doc_id)      # frisch: Tags und Felder koennen sich seit dem Vorlauf geaendert haben
             log.info("doc=%s text erkannt (%d zeichen, %.0fs): einordnen und auslesen mit dem modell", doc_id,
                      len(roh), time.monotonic() - t0)
+            uhr = Stoppuhr(vorlauf=v["dauer"])
             inv, issues, notes, methode, modell = self._rechnung_auslesen(
                 original, roh, workdir, kategorie="rechnung" if erzwingen else None)
+            uhr.runde("lesen")
             kat = inv["kategorie"]
             kein_beleg = not invoice.ist_rechnungsartig(kat)
             ohne_betrag = not kein_beleg and inv["gross"] is None
@@ -652,22 +674,26 @@ class Nopaper:
                     kat not in ("behoerde", "versicherung") or re.search(r"€|\bEUR\b|\bEuro\b", roh) is not None)
                 log.info("nachbearbeitung doc=%s KEINE_RECHNUNG kategorie=%s -> volltext-weg", doc_id, kat or "-")
                 felder, titel, mcodes = self._mahnung(inv, roh) if kat == "mahnung" else ({}, None, [])
-                self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0,
+                self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0, v, uhr,
                                   pruefen=pruefen or "MAHNUNG_BETRAG_NICHT_GELESEN" in mcodes,
                                   vorweg=("KEINE_RECHNUNG", *mcodes), zusatz_felder=felder, titel=titel,
                                   zusatz_tags=self.tag_kategorie.get(kat, []) if kein_beleg else [])
                 return "keine_rechnung"
             log.info("doc=%s ausgelesen als %s (%.0fs): text glaetten, codes lesen, in paperless schreiben", doc_id,
                      kat or "-", time.monotonic() - t0)
+            # Pruefsumme der Archivfassung nebenher holen, waehrend das Modell weiterarbeitet (E78)
+            archiv = self._neben.submit(self._archiv_sha, doc_id, meta)
             notes = notes + self._positionen(doc_id, inv, roh)
+            uhr.runde("positionen")
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
-            gelesen = self.codes_lesen(original, workdir)
+            uhr.runde("glaetten")
+            gelesen = v["codes"]
             girocode_anwenden(inv, issues, notes, qr.erster_girocode(gelesen))
             prev = self._duplikat(inv, doc_id)
             if prev is not None:
                 issues.append(f"DUPLIKAT_VON_DOKUMENT_{prev}")
             status = "ok" if not issues else "pruefen"
-            sha_a = self._archiv_sha(doc_id, meta)
+            sha_a = archiv.result()
 
             tags = set(doc.get("tags") or [])
             tags.discard(self.tag_ausloeser)
@@ -675,7 +701,7 @@ class Nopaper:
             tags.discard(self.tag_text)  # der Volltext wird hier ohnehin erneuert
             tags |= set(self.tag_rechnung)
             tags |= set(self.tag_kategorie.get(inv["kategorie"], []))
-            az_tags, az_codes = self._aktenzeichen(roh, text)   # z.B. Kostenrechnung zu einem Verfahren
+            az_tags, az_codes = self._aktenzeichen(roh, text, v["az"])   # z.B. Kostenrechnung zu einem Verfahren
             tags |= set(az_tags)
             codes = codes + az_codes
             if issues and self.tag_pruefen:
@@ -704,8 +730,9 @@ class Nopaper:
                 self.pl.aendern(doc_id, aenderung)
                 self._sidecar(doc_id, inv, issues, notes + codes, "nachbearbeitung", sha_o, sha_a, methode,
                               modell, md5_o)
-        log.info("nachbearbeitung doc=%s status=%s codes=%s dauer=%.0fs", doc_id, status,
-                 ",".join(issues + notes + codes) or "-", time.monotonic() - t0)
+        uhr.runde("schreiben")
+        log.info("nachbearbeitung doc=%s status=%s codes=%s dauer=%.0fs zeiten=%s", doc_id, status,
+                 ",".join(issues + notes + codes) or "-", time.monotonic() - t0, uhr)
         return status
 
     # ------------------------------------------------------------------ Schleife
@@ -755,7 +782,8 @@ class Nopaper:
             workdir = Path(tmp)
             original, meta, sha_o, md5_o, roh = v["original"], v["meta"], v["sha_o"], v["md5_o"], v["roh"]
             doc = self.pl.dokument(doc_id)      # frisch: Tags und Felder koennen sich seit dem Vorlauf geaendert haben
-            return self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_text, t0)
+            return self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_text, t0, v,
+                                     Stoppuhr(vorlauf=v["dauer"]))
 
     def _mahnung(self, inv: dict, roh: str) -> tuple[dict[int, object], str | None, list[str]]:
         """Zahlungsangaben einer Mahnung fuer die Felder (E77): Absender, Datum, offener Betrag, IBAN und
@@ -795,7 +823,8 @@ class Nopaper:
         return felder, titel, codes
 
     def _dokumentweg(self, doc_id: int, doc: dict, original: Path, workdir: Path, roh: str, ausloeser: int,
-                     t0: float, pruefen: bool = False, vorweg: tuple = (), zusatz_felder: dict | None = None,
+                     t0: float, v: dict, uhr: "Stoppuhr", pruefen: bool = False, vorweg: tuple = (),
+                     zusatz_felder: dict | None = None,
                      titel: str | None = None, zusatz_tags=()) -> str:
         """Kern des Volltext-Wegs fuer ein Dokument, das keine Rechnung ist: Text glaetten und (wenn nicht
         schlechter) zurueckschreiben, Termin einer Ladung und Codes in die eingerichteten Felder, Ausloeser
@@ -803,13 +832,13 @@ class Nopaper:
         log.info("doc=%s volltext-weg (%.0fs): text glaetten, termin und codes suchen, in paperless schreiben",
                  doc_id, time.monotonic() - t0)
         text, codes = glaetten_wenn_noetig(self.cfg, self.ki, original, roh)
+        uhr.runde("glaetten")
         tcodes, tfelder = self._termin(roh, text)
-        if "barcode" in self.felder or "qrcode" in self.felder:
-            tfelder.update(self._code_felder(self.codes_lesen(original, workdir)))
+        tfelder.update(self._code_felder(v["codes"]))
         tfelder.update(zusatz_felder or {})
         alt = doc.get("content") or ""
         ersetzen = ocr.text_nicht_schlechter(alt, text)
-        az_tags, az_codes = self._aktenzeichen(roh, text)
+        az_tags, az_codes = self._aktenzeichen(roh, text, v["az"])
         tcodes = tcodes + az_codes
         tags = set(doc.get("tags") or [])
         tags.discard(ausloeser)
@@ -827,16 +856,17 @@ class Nopaper:
         codes = list(vorweg) + codes + tcodes
         (g_alt, q_alt), (g_neu, q_neu) = ocr.textguete(alt), ocr.textguete(text)
         ergebnis = "TEXT_ERSETZT" if ersetzen else "TEXT_BEHALTEN"
-        log.info("text doc=%s %s lesbar alt=%d (%.0f%%) neu=%d (%.0f%%) codes=%s dauer=%.0fs", doc_id, ergebnis,
-                 g_alt, q_alt * 100, g_neu, q_neu * 100, ",".join(codes) or "-", time.monotonic() - t0)
+        uhr.runde("schreiben")
+        log.info("text doc=%s %s lesbar alt=%d (%.0f%%) neu=%d (%.0f%%) codes=%s dauer=%.0fs zeiten=%s", doc_id,
+                 ergebnis, g_alt, q_alt * 100, g_neu, q_neu * 100, ",".join(codes) or "-", time.monotonic() - t0, uhr)
         return ergebnis
 
-    def _aktenzeichen(self, roh: str, text: str) -> tuple[list[int], list[str]]:
+    def _aktenzeichen(self, roh: str, text: str, tags: dict | None = None) -> tuple[list[int], list[str]]:
         """Vorhandenen Aktenzeichen-Tag zuordnen (E70). nopaper legt keinen Tag an (E40): Steht ein
         bezeichnetes Aktenzeichen im Text, zu dem es keinen Tag gibt, bleibt es beim Hinweis im Protokoll."""
         if not self.cfg.tags_aktenzeichen:
             return [], []
-        ids, _ = termin.aktenzeichen_tags(roh + "\n" + text, self.pl.tags(frisch=True))
+        ids, _ = termin.aktenzeichen_tags(roh + "\n" + text, tags if tags is not None else self.pl.tags_frisch())
         if ids:
             return ids, [f"AKTENZEICHEN_ZUGEORDNET_{len(ids)}"]
         if termin.aktenzeichen(roh) or termin.aktenzeichen(text):

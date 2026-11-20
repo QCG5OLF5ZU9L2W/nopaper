@@ -1230,6 +1230,13 @@ class NopaperTest(unittest.TestCase):
         self.assertIn("nopaper prüfen", self.tagnamen(99))
         self.assertEqual(self.feld(99, "Erkannt: Belegart"), "mahnung")
 
+    def test_stoppuhr(self):
+        from nopaper.pipeline import Stoppuhr
+        u = Stoppuhr(vorlauf=4.2)
+        u.runde("lesen")
+        u.runde("schreiben")
+        self.assertRegex(str(u), r"^vorlauf:4,lesen:\d+,schreiben:\d+$")
+
     def test_fehlerantwort_nur_feldnamen(self):
         from nopaper.paperless import _fehlerschluessel
         antwort = json.dumps({"custom_fields": [{}, {"non_field_errors": ["Wert 'Muster 11:00 Uhr' ungueltig"]}],
@@ -1590,13 +1597,14 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(self.feld(101, "Erkannt: Barcode"), "A-1 | B-2")
         self.assertEqual(self.feld(101, "Erkannt: QR-Code"), "eins\n---\nzwei")
 
-    def test_ohne_code_felder_wird_im_volltext_weg_nicht_gelesen(self):
+    def test_ohne_code_felder_wird_im_volltext_weg_nichts_geschrieben(self):
+        # gelesen wird seit E78 im Vorlauf, bevor feststeht, ob es eine Rechnung ist; geschrieben nur in Felder
         np = self.mit_codes([("CODE-128", "A-1")], felder=())
         tt = next(i for i, n in W.tags.items() if n == "totext")
         W.docs[102] = {"id": 102, "content": "x", "tags": [tt], "custom_fields": [], "owner": None,
                        "original": b"%PDF BRIEF ohne", "archive": b"A"}
         np.nachbearbeitung_abfragen()
-        self.assertEqual((self.aufrufe, W.docs[102]["custom_fields"]), ([], []))
+        self.assertEqual(W.docs[102]["custom_fields"], [])
 
     def test_girocode_liefert_iban_und_verwendungszweck(self):
         # das Modell hat die IBAN falsch und den Zweck gar nicht gelesen; der Ueberweisungs-Code geht vor
