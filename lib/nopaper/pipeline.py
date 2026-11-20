@@ -15,7 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import VERSION, invoice, llm, ocr
+from . import VERSION, invoice, llm, ocr, termin
 from .config import FELD_TYPEN, Config
 from .kumero import Kumero
 from .paperless import Paperless, PaperlessFehler, Voruebergehend
@@ -28,6 +28,7 @@ HINWEIS_CODES = {"UST_AUFSCHLUESSELUNG_BERECHNET", "NETTO_BERECHNET", "BILDMODEL
                  "BRUTTO_AUS_AUFSCHLUESSELUNG", "UST_NULLSATZ_KORRIGIERT", "UST_SATZ_BERECHNET",
                  "BEFREIUNGSGRUND_ERSETZT", "STEUERNUMMER_VERWORFEN", "RECHNUNGSNUMMER_VERWORFEN", "RUECKGELD_ERKANNT", "VERWENDUNGSZWECK_VERWORFEN", "VERWENDUNGSZWECK_AUS_TEXT", "RECHNUNGSNUMMER_ABWEICHEND", "ZAHLUNG_AUS_TEXT", "FAELLIGKEIT_BERECHNET", "SKONTO_VERWORFEN", "ZWEITE_LESUNG", "GLAETTUNG_UEBERSPRUNGEN",
                  "VERSICHERUNGSTEUER_KORRIGIERT"}
+TERMIN_FELDER = ("termin", "terminzeit", "aktenzeichen")
 SIDECAR_HINWEIS = ("Maschinell aus Papierbeleg extrahiert. Keine E-Rechnung im Sinne von § 14 UStG; "
                    "massgeblich ist der Originalbeleg mit dem angegebenen SHA-256.")
 
@@ -549,9 +550,10 @@ class Nopaper:
 
     # ------------------------------------------------------------------ Weg 3: nur Volltext erneuern
     def text_verbessern(self, doc_id: int) -> str:
-        """Dokument mit Text-Ausloeser: Text neu erkennen und glaetten, NUR den Volltext zurueckschreiben
-        (keine Felder, kein Titel, keine weiteren Tags, kein Sidecar). Ersetzt wird nur, wenn der neue
-        Text nicht schlechter ist als der vorhandene."""
+        """Dokument mit Text-Ausloeser: Text neu erkennen und glaetten, den Volltext zurueckschreiben
+        (kein Titel, kein Sidecar, keine Rechnungsfelder). Ersetzt wird nur, wenn der neue Text nicht
+        schlechter ist als der vorhandene. Sind Termin-Felder eingerichtet (E62), wird bei einer Ladung
+        zusaetzlich der Verhandlungstermin in diese Felder geschrieben."""
         self.ids_laden()
         c = self.cfg
         t0 = time.monotonic()
@@ -569,19 +571,42 @@ class Nopaper:
             if not roh.strip():
                 raise PaperlessFehler("KEIN_OCR_TEXT")
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
+            tcodes, tfelder = self._termin(roh, text)
         alt = doc.get("content") or ""
         ersetzen = ocr.text_nicht_schlechter(alt, text)
         tags = set(doc.get("tags") or [])
         tags.discard(self.tag_text)
+        if self.tag_pruefen and ({"TERMIN_NICHT_ERKANNT", "TERMIN_MEHRDEUTIG"} & set(tcodes)):
+            tags.add(self.tag_pruefen)      # Ladung ohne sicheren Termin: ein Mensch muss hinsehen
         aenderung: dict = {"tags": sorted(tags)}
         if ersetzen:
             aenderung["content"] = text
+        if tfelder:
+            aenderung["custom_fields"] = self._felder_mischen(doc.get("custom_fields"), tfelder)
         self.pl.aendern(doc_id, aenderung)
+        codes = codes + tcodes
         (g_alt, q_alt), (g_neu, q_neu) = ocr.textguete(alt), ocr.textguete(text)
         ergebnis = "TEXT_ERSETZT" if ersetzen else "TEXT_BEHALTEN"
         log.info("text doc=%s %s lesbar alt=%d (%.0f%%) neu=%d (%.0f%%) codes=%s dauer=%.0fs", doc_id, ergebnis,
                  g_alt, q_alt * 100, g_neu, q_neu * 100, ",".join(codes) or "-", time.monotonic() - t0)
         return ergebnis
+
+    def _termin(self, roh: str, text: str) -> tuple[list[str], dict[int, object]]:
+        """Ladung erkennen und den Termin fuer die eingerichteten Felder liefern (E62). Feste Regeln, kein
+        Modell. Gelesen wird zuerst der rohe, zeilentreue Text, sonst der geglaettete."""
+        if not any(k in self.felder for k in TERMIN_FELDER):
+            return [], {}
+        werte, codes = termin.erkennen(roh)
+        if "TERMIN_ERKANNT" not in codes:
+            w2, c2 = termin.erkennen(text)
+            if "TERMIN_ERKANNT" in c2:
+                werte, codes = w2, c2
+        out: dict[int, object] = {}
+        for key in TERMIN_FELDER:
+            if key in self.felder and werte.get(key) is not None:
+                v = werte[key]
+                out[self.felder[key][0]] = v.isoformat() if isinstance(v, dt.date) else v
+        return codes, out
 
     def nachbearbeitung_abfragen(self) -> int:
         self.ids_laden()

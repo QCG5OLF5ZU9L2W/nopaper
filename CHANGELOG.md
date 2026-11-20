@@ -2,6 +2,14 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.7.0
+
+- **Termin aus einer Ladung** (Entscheidung E62): Im Volltext-Weg (Tag aus `tags.ausloeser_text`) erkennt nopaper eine gerichtliche Ladung und schreibt den Verhandlungstermin in benutzerdefinierte Felder: `felder.termin` (Datum), `felder.terminzeit` (Uhrzeit und Saal), `felder.aktenzeichen`. Jedes Feld ist optional.
+  - Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das bei „Termin“, „Verhandlung“, „geladen“ oder „anberaumt“ steht und dem eine Uhrzeit folgt.
+  - Ist der Termin nicht sicher lesbar oder stehen mehrere im Text (Umladung), bleiben die Felder leer und das Dokument bekommt den Prüf-Tag.
+  - Ohne diese Feldschlüssel ändert sich am Volltext-Weg nichts.
+- Bisher nur an Musterschreiben geprüft.
+
 ## 1.6.0
 
 - **Neue Betriebsart „erst paperless“** (`"betriebsart": "paperless"`, Entscheidung E61): Der Scanner liefert direkt an paperless, nopaper reagiert nur noch auf die Auslöser-Tags und schreibt alles zurück. nopaper ist dabei zustandslos: keine Datenbank, kein Eingangs-, Ausgangs- oder Fehlerordner.

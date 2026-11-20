@@ -37,6 +37,20 @@ Steuerfrei nach § 4 Nr. 14 UStG
 Rechnungsbetrag 1.234,56 EUR
 IBAN DE89 3704 0044 0532 0130 00"""
 
+LADUNG_TEXT = """Verwaltungsgericht Musterstadt
+Musterallee 1, 12345 Musterstadt                      Musterstadt, 12.11.2026
+Az.: 7 A 1234/26 MS
+                              Ladung
+                   (Zum Termin bitte mitbringen!)
+Sehr geehrte Frau Mustermann,
+
+Termin zur muendlichen Verhandlung vor der Einzelrichterin wird anberaumt auf
+
+            Freitag, den 15.01.2027, 11:00 Uhr, Sitzungssaal V
+
+Zu diesem Termin werden Sie hiermit geladen.
+"""
+
 BRIEF_TEXT = "Sehr geehrte Damen und Herreu,\nanbei die Unterlagen vom 12.10.2026.\nMit freundlichen Gruessen"
 
 LLM_RECHNUNG = {
@@ -58,7 +72,8 @@ FELDER = {"Erkannt: Rechnungsnummer": "string", "Erkannt: Rechnungsdatum": "date
           "Erkannt: Betrag netto": "monetary", "Erkannt: Steuer_High": "monetary",
           "Erkannt: Steuer_Low": "monetary", "Erkannt: Zahlbetrag": "monetary", "Erkannt: Skonto": "string",
           "IBAN": "string", "Erkannt: Belegart": "string", "Erkannt: Verwendungszweck": "string",
-          "Erkannt: Sidecar": "longtext"}
+          "Erkannt: Sidecar": "longtext", "Erkannt: Termin": "date", "Erkannt: Terminzeit": "string",
+          "Erkannt: Aktenzeichen": "string"}
 
 
 class Welt:
@@ -257,6 +272,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def fake_ocr(original: Path, workdir: Path, sprache: str = "deu") -> str:
     data = original.read_bytes()
+    if b"UMLADUNG" in data:
+        return ("Umladung\nDer Termin vom 10.12.2026, 10:00 Uhr wird aufgehoben.\n"
+                "Neuer Termin: 15.01.2027, 11:00 Uhr, Saal 2\n")
+    if b"LADUNG" in data:
+        return LADUNG_TEXT
     return RECHNUNG_TEXT if b"RECHNUNG" in data else (BRIEF_TEXT if b"BRIEF" in data else "")
 
 
@@ -870,6 +890,91 @@ class NopaperTest(unittest.TestCase):
         self.assertEqual(self.tagnamen(74), {"Scan"})
         self.assertIn("Unterlagen", W.docs[74]["content"])
         self.assertEqual(W.docs[74]["custom_fields"], [])        # kein Sidecar, keine Felder
+
+    # ------------------------------------------------------------------ Termin aus einer Ladung (E62)
+    def mit_termin(self, felder=("termin", "terminzeit", "aktenzeichen")):
+        namen = {"termin": "Erkannt: Termin", "terminzeit": "Erkannt: Terminzeit",
+                 "aktenzeichen": "Erkannt: Aktenzeichen"}
+        d = json.loads((self.tmp / "config.json").read_text())
+        for k in felder:
+            d["felder"][k] = namen[k]
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        self.np.state.db.close()
+        self.cfg = config.load(self.tmp / "config.json")
+        self.np = Nopaper(self.cfg, ocr_text=fake_ocr, seite_als_bild=lambda o, w: "QklMRA==",
+                          zweite_lesung=lambda o, w, s="deu": "")
+        self.tt = next(i for i, n in W.tags.items() if n == "totext")
+        return self.np
+
+    def test_ladung_termin_in_felder(self):
+        np = self.mit_termin()
+        W.docs[80] = {"id": 80, "content": "x", "tags": [3, self.tt], "owner": None,
+                      "custom_fields": [{"field": 99, "value": "bleibt"}],
+                      "original": b"%PDF LADUNG 1", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.feld(80, "Erkannt: Termin"), "2027-01-15")
+        self.assertEqual(self.feld(80, "Erkannt: Terminzeit"), "11:00 Uhr, Sitzungssaal V")
+        self.assertEqual(self.feld(80, "Erkannt: Aktenzeichen"), "7 A 1234/26 MS")
+        self.assertIn({"field": 99, "value": "bleibt"}, W.docs[80]["custom_fields"])
+        self.assertEqual(self.tagnamen(80), {"Scan"})                    # Ausloeser weg, kein Pruef-Tag
+        self.assertIn("anberaumt", W.docs[80]["content"])                # der Volltext wird wie bisher erneuert
+        self.assertEqual(len(W.patches), 1)                              # alles in einem Aufruf
+        self.assertFalse([c for c in W.llm_calls if not c[1].startswith("Du korrigierst")],
+                         "die Termin-Erkennung braucht kein Sprachmodell")
+
+    def test_ladung_nur_eingerichtete_felder(self):
+        np = self.mit_termin(felder=("termin",))
+        W.docs[81] = {"id": 81, "content": "x", "tags": [self.tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF LADUNG 2", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(len(W.docs[81]["custom_fields"]), 1)
+        self.assertEqual(self.feld(81, "Erkannt: Termin"), "2027-01-15")
+
+    def test_umladung_mehrdeutig_geht_in_die_pruefung(self):
+        np = self.mit_termin()
+        W.docs[82] = {"id": 82, "content": "x", "tags": [self.tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF UMLADUNG", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertIsNone(self.feld(82, "Erkannt: Termin"))             # zwei Termine im Text: nicht raten
+        self.assertEqual(self.tagnamen(82), {"nopaper prüfen"})
+
+    def test_brief_bekommt_keine_termin_felder(self):
+        np = self.mit_termin()
+        W.docs[83] = {"id": 83, "content": "x", "tags": [self.tt], "custom_fields": [], "owner": None,
+                      "original": b"%PDF BRIEF t", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual((W.docs[83]["custom_fields"], W.docs[83]["tags"]), ([], []))
+
+    def test_ohne_termin_felder_bleibt_der_volltext_weg_wie_bisher(self):
+        W.docs[84] = {"id": 84, "content": "x", "tags": [next(i for i, n in W.tags.items() if n == "totext")],
+                      "custom_fields": [], "owner": None, "original": b"%PDF LADUNG 3", "archive": b"A"}
+        self.np.nachbearbeitung_abfragen()
+        self.assertEqual(W.docs[84]["custom_fields"], [])
+        self.assertEqual(W.patches, [(84, ["content", "tags"])])
+
+    def test_termin_regeln(self):
+        from nopaper import termin
+        e = termin.erkennen
+        self.assertEqual(e(LADUNG_TEXT)[1], ["TERMIN_ERKANNT"])
+        w, c = e("Ladung\nSie werden geladen zum Termin am Dienstag, 3. März 2027 um 9.30 Uhr in Saal 4.\n")
+        self.assertEqual((w["termin"].isoformat(), w["terminzeit"], c), ("2027-03-03", "09:30 Uhr, Saal 4",
+                                                                         ["TERMIN_ERKANNT"]))
+        w, c = e("Ladung zum Termin\nTermin zur Erörterung: 02.02.2027, 14 Uhr, Raum 1.07\n")
+        self.assertEqual((w["termin"].isoformat(), w["terminzeit"]), ("2027-02-02", "14:00 Uhr, Raum 1.07"))
+        # keine Ladung: nichts, auch wenn ein Termin mit Uhrzeit im Text steht
+        self.assertEqual(e("Sehr geehrte Frau Muster, Ihr Termin ist am 03.12.2026 um 10:00 Uhr.\n"), ({}, []))
+        self.assertEqual(e("Einladung zur Mitgliederversammlung\nTermin: 03.12.2026, 19:00 Uhr\n"), ({}, []))
+        # Ladung, aber kein sicherer Termin: Feld leer, Hinweis fuer die Pruefung
+        self.assertEqual(e("Ladung\nTermin zur Verhandlung am 15.01.2027.\n"), ({}, ["TERMIN_NICHT_ERKANNT"]))
+        self.assertEqual(e("Ladung\nTermin wird anberaumt auf Freitag, den 15.O1.2027, 11:00 Uhr\n"),
+                         ({}, ["TERMIN_NICHT_ERKANNT"]))                  # Lesefehler im Datum
+        self.assertEqual(e("Musterstadt, 12.11.2026\nLadung\nSie werden geladen. Näheres folgt.\n"),
+                         ({}, ["TERMIN_NICHT_ERKANNT"]))                  # das Briefdatum ist kein Termin
+        self.assertEqual(e("Ladung\nTermin anberaumt auf 31.02.2027, 11:00 Uhr\n")[1], ["TERMIN_NICHT_ERKANNT"])
+        # zwei verschiedene Aktenzeichen: keines uebernehmen
+        w, _ = e("Ladung\nAz.: 7 A 1234/26\nAktenzeichen: 3 K 99/25\nTermin anberaumt auf 15.01.2027, 11:00 Uhr\n")
+        self.assertNotIn("aktenzeichen", w)
+        self.assertEqual(w["termin"].isoformat(), "2027-01-15")
 
     def test_paperless_zuerst_konfiguration(self):
         d = json.loads((self.tmp / "config.json").read_text())

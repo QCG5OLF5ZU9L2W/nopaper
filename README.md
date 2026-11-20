@@ -260,6 +260,20 @@ Grenzen: Die Betriebsart ist bisher nur in den Offline-Tests gelaufen. Die Gegen
 
 Der Volltext wird nur ersetzt, wenn der neue Text nicht schlechter ist als der vorhandene.
 
+## Termin aus einer Ladung
+
+Trägt ein Dokument den Tag aus `tags.ausloeser_text` und ist es eine gerichtliche Ladung, schreibt nopaper den Verhandlungstermin in benutzerdefinierte Felder. Dafür in paperless die Felder anlegen und in der Konfiguration unter `felder` eintragen; jedes ist optional:
+
+| Schlüssel in `felder` | Datentyp | Inhalt |
+|---|---|---|
+| `termin` | Datum | Tag der Verhandlung |
+| `terminzeit` | Text | Uhrzeit und Saal, z. B. „11:00 Uhr, Sitzungssaal V“ |
+| `aktenzeichen` | Text | Aktenzeichen des Gerichts |
+
+Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das bei „Termin“, „Verhandlung“, „geladen“ oder „anberaumt“ steht und dem eine Uhrzeit folgt. Ist der Termin nicht sicher lesbar oder stehen mehrere im Text (etwa bei einer Umladung), bleiben die Felder leer und das Dokument bekommt den Prüf-Tag.
+
+Das Feld ist eine Arbeitshilfe und ersetzt keine Fristenkontrolle: Liest die Texterkennung eine Ziffer falsch, steht der falsche Tag im Feld. Maßgeblich ist die Ladung selbst.
+
 ## Verzeichnisse
 
 | Pfad | Zweck |
