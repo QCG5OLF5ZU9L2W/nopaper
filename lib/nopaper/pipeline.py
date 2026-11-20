@@ -594,13 +594,18 @@ class Nopaper:
                 raise PaperlessFehler("KEIN_OCR_TEXT")
             inv, issues, notes, methode, modell = self._rechnung_auslesen(
                 original, roh, workdir, kategorie="rechnung" if erzwingen else None)
-            if not invoice.ist_rechnungsartig(inv["kategorie"]):
-                # kein Beleg: nichts schreiben ausser den Tags, damit ein Mensch entscheidet
-                tags = (set(doc.get("tags") or []) - {self.tag_ausloeser}) | (
-                    {self.tag_pruefen} if self.tag_pruefen else set())
-                self.pl.aendern(doc_id, {"tags": sorted(tags)})
-                log.info("nachbearbeitung doc=%s KEINE_RECHNUNG kategorie=%s dauer=%.0fs", doc_id,
-                         inv["kategorie"] or "-", time.monotonic() - t0)
+            kat = inv["kategorie"]
+            kein_beleg = not invoice.ist_rechnungsartig(kat)
+            ohne_betrag = not kein_beleg and inv["gross"] is None
+            if not erzwingen and (kein_beleg or ohne_betrag):
+                # E69: Der Ausloeser gilt fuer jedes Dokument. Was keine Rechnung ist – auch ein Schreiben eines
+                # Gerichts oder einer Behoerde ohne Betrag, etwa eine Ladung – nimmt den Volltext-Weg.
+                # Pruef-Tag nur, wenn es nach einem Beleg aussieht, dessen Betrag nicht gelesen wurde.
+                pruefen = ohne_betrag and not termin.ist_ladung(roh) and (
+                    kat not in ("behoerde", "versicherung") or re.search(r"€|\bEUR\b|\bEuro\b", roh) is not None)
+                log.info("nachbearbeitung doc=%s KEINE_RECHNUNG kategorie=%s -> volltext-weg", doc_id, kat or "-")
+                self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_ausloeser, t0, pruefen=pruefen,
+                                  vorweg=("KEINE_RECHNUNG",))
                 return "keine_rechnung"
             text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
             gelesen = self.codes_lesen(original, workdir)
@@ -702,23 +707,30 @@ class Nopaper:
             roh = self.ocr_text(original, workdir, c.ocr_sprache)
             if not roh.strip():
                 raise PaperlessFehler("KEIN_OCR_TEXT")
-            text, codes = glaetten_wenn_noetig(c, self.ki, original, roh)
-            tcodes, tfelder = self._termin(roh, text)
-            if "barcode" in self.felder or "qrcode" in self.felder:
-                tfelder.update(self._code_felder(self.codes_lesen(original, workdir)))
+            return self._dokumentweg(doc_id, doc, original, workdir, roh, self.tag_text, t0)
+
+    def _dokumentweg(self, doc_id: int, doc: dict, original: Path, workdir: Path, roh: str, ausloeser: int,
+                     t0: float, pruefen: bool = False, vorweg: tuple = ()) -> str:
+        """Kern des Volltext-Wegs fuer ein Dokument, das keine Rechnung ist: Text glaetten und (wenn nicht
+        schlechter) zurueckschreiben, Termin einer Ladung und Codes in die eingerichteten Felder, Ausloeser
+        entfernen – alles in einem Aufruf. `pruefen` setzt zusaetzlich den Pruef-Tag."""
+        text, codes = glaetten_wenn_noetig(self.cfg, self.ki, original, roh)
+        tcodes, tfelder = self._termin(roh, text)
+        if "barcode" in self.felder or "qrcode" in self.felder:
+            tfelder.update(self._code_felder(self.codes_lesen(original, workdir)))
         alt = doc.get("content") or ""
         ersetzen = ocr.text_nicht_schlechter(alt, text)
         tags = set(doc.get("tags") or [])
-        tags.discard(self.tag_text)
-        if self.tag_pruefen and ({"TERMIN_NICHT_ERKANNT", "TERMIN_MEHRDEUTIG"} & set(tcodes)):
-            tags.add(self.tag_pruefen)      # Ladung ohne sicheren Termin: ein Mensch muss hinsehen
+        tags.discard(ausloeser)
+        if self.tag_pruefen and (pruefen or {"TERMIN_NICHT_ERKANNT", "TERMIN_MEHRDEUTIG"} & set(tcodes)):
+            tags.add(self.tag_pruefen)      # z.B. Ladung ohne sicheren Termin: ein Mensch muss hinsehen
         aenderung: dict = {"tags": sorted(tags)}
         if ersetzen:
             aenderung["content"] = text
         if tfelder:
             aenderung["custom_fields"] = self._felder_mischen(doc.get("custom_fields"), tfelder)
         self.pl.aendern(doc_id, aenderung)
-        codes = codes + tcodes
+        codes = list(vorweg) + codes + tcodes
         (g_alt, q_alt), (g_neu, q_neu) = ocr.textguete(alt), ocr.textguete(text)
         ergebnis = "TEXT_ERSETZT" if ersetzen else "TEXT_BEHALTEN"
         log.info("text doc=%s %s lesbar alt=%d (%.0f%%) neu=%d (%.0f%%) codes=%s dauer=%.0fs", doc_id, ergebnis,

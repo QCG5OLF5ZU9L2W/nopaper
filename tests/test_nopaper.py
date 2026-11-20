@@ -943,6 +943,40 @@ class NopaperTest(unittest.TestCase):
         self.assertFalse([c for c in W.llm_calls if not c[1].startswith("Du korrigierst")],
                          "die Termin-Erkennung braucht kein Sprachmodell")
 
+    def test_ladung_mit_dem_rechnungs_ausloeser(self):
+        # E69: Das Modell haelt ein Schreiben vom Gericht fuer "behoerde" – ohne Betrag ist es aber kein Beleg.
+        # Die Ladung nimmt den Volltext-Weg, der Termin kommt in die Felder, keine Rechnungs-Tags, kein Sidecar.
+        np = self.mit_termin()
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e.update(invoice_number=None, issue_date="2026-11-12", due_date=None)
+        e["seller"] = dict(e["seller"], name="Verwaltungsgericht Musterstadt", tax_number=None)
+        e["payment"] = {"iban": None, "bic": None, "reference": None}
+        e["totals"] = {"net_total": None, "tax_total": None, "gross_total": None, "prepaid": None,
+                       "amount_due": None}
+        e["vat_breakdown"] = []
+        W.extraktion, W.einordnung = e, "behoerde"
+        W.docs[85] = {"id": 85, "content": "x", "tags": [3, 5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF LADUNG gericht", "archive": b"A"}
+        np.nachbearbeitung_abfragen()
+        self.assertEqual(self.feld(85, "Erkannt: Termin"), "2027-01-15")
+        self.assertEqual(self.feld(85, "Erkannt: Terminzeit"), "11:00 Uhr, Sitzungssaal V")
+        self.assertEqual(self.tagnamen(85), {"Scan"})                         # keine Rechnungs-Tags, kein Pruef-Tag
+        self.assertIsNone(self.feld(85, "Erkannt: Rechnungssteller"))
+        self.assertFalse(list((self.tmp / "aus").glob("*.xml")))
+
+    def test_beleg_ohne_lesbaren_betrag_geht_in_die_pruefung(self):
+        # sieht nach Rechnung aus, aber der Betrag wurde nicht gelesen: Volltext-Weg MIT Pruef-Tag
+        e = copy.deepcopy(LLM_RECHNUNG)
+        e["totals"] = {"net_total": None, "tax_total": None, "gross_total": None, "prepaid": None,
+                       "amount_due": None}
+        e["vat_breakdown"] = []
+        W.extraktion = e
+        W.docs[86] = {"id": 86, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG ohne betrag", "archive": b"A"}
+        self.np.nachbearbeitung_abfragen()
+        self.assertEqual(self.tagnamen(86), {"nopaper prüfen"})
+        self.assertFalse(list((self.tmp / "aus").glob("*.xml")))
+
     def test_ladung_nur_eingerichtete_felder(self):
         np = self.mit_termin(felder=("termin",))
         W.docs[81] = {"id": 81, "content": "x", "tags": [self.tt], "custom_fields": [], "owner": None,
@@ -1024,17 +1058,18 @@ class NopaperTest(unittest.TestCase):
         with self.assertRaisesRegex(config.ConfigError, "Pflichtangabe fehlt: eingang"):
             laden(eingang=None)                                                 # Scanner-Betrieb braucht die Ordner
 
-    def test_ausloeser_an_einem_brief_setzt_pruef_tag_und_macht_weiter(self):
-        # E63: ein Dokument mit Rechnungs-Ausloeser, das keine Rechnung ist, wird nicht zur Rechnung erklaert
+    def test_ausloeser_an_einem_brief_nimmt_den_volltext_weg(self):
+        # E69: ein Dokument mit dem Ausloeser, das keine Rechnung ist, wird nicht zur Rechnung erklaert,
+        # sondern wie im Volltext-Weg behandelt – ohne Pruef-Tag, ein Brief ist kein Fehler
         W.einordnung = "brief"
-        W.docs[90] = {"id": 90, "content": "alt", "tags": [3, 5], "custom_fields": [{"field": 99, "value": "x"}],
+        W.docs[90] = {"id": 90, "content": "x", "tags": [3, 5], "custom_fields": [{"field": 99, "value": "x"}],
                       "owner": None, "original": b"%PDF BRIEF kein beleg", "archive": b"A"}
         self.assertEqual(self.np.nachbearbeitung_abfragen(), 1)
-        self.assertEqual(self.tagnamen(90), {"Scan", "nopaper prüfen"})      # Ausloeser weg, Pruef-Tag dran
-        self.assertEqual(W.patches, [(90, ["tags"])])                         # sonst nichts geschrieben
-        self.assertEqual((W.docs[90]["content"], W.docs[90]["custom_fields"]), ("alt", [{"field": 99, "value": "x"}]))
+        self.assertEqual(self.tagnamen(90), {"Scan"})                         # Ausloeser weg, kein Pruef-Tag
+        self.assertEqual(W.patches, [(90, ["content", "tags"])])              # nur Volltext und Tags
+        self.assertIn("Unterlagen", W.docs[90]["content"])
+        self.assertEqual(W.docs[90]["custom_fields"], [{"field": 99, "value": "x"}])   # keine Rechnungsfelder
         self.assertFalse(list((self.tmp / "aus").glob("*.xml")))              # kein Sidecar
-        self.assertFalse([c for c in W.llm_calls if c[1].startswith("Du korrigierst")])   # keine Glaettung
         # das naechste Dokument laeuft normal weiter
         W.einordnung = "rechnung"
         W.docs[91] = {"id": 91, "content": "", "tags": [5], "custom_fields": [], "owner": None,

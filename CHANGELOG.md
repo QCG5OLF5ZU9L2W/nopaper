@@ -2,6 +2,12 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.2
+
+- **Ein Auslöser für jedes Dokument** (E69): Trägt ein Dokument den Tag aus `tags.ausloeser_nachbearbeitung` und ist es keine Rechnung, behandelt nopaper es wie im Volltext-Weg: Volltext erneuern, Termin einer Ladung und Codes in die Felder, Auslöser entfernen. Keine Rechnungs-Tags, kein Sidecar, kein Prüf-Tag für gewöhnliche Schreiben.
+- **Schreiben eines Gerichts oder einer Behörde ohne Betrag** gelten nicht mehr als Beleg. Anlass: Eine Ladung wurde als Rechnung der Kategorie Behörde angelegt.
+- Sieht ein Dokument nach einem Beleg aus, dessen Betrag nicht gelesen wurde, bekommt es den Prüf-Tag.
+
 ## 1.8.1
 
 - **Duplikatsuche in der Betriebsart „erst paperless“ repariert:** paperless lehnte die Feldabfrage mit HTTP 400 ab, weil es den verwendeten Operator nicht kennt; die Duplikatsuche fiel dadurch aus. nopaper fragt jetzt nur noch ein Feld mit einem Operator ab, den paperless dokumentiert, und vergleicht Rechnungsnummer und Rechnungssteller selbst genau.
