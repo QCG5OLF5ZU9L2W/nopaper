@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.9.8
+
+- **Codes lesen um ein Mehrfaches schneller** (E80): Die Seitenbilder für `zbarimg` werden unkomprimiert geschrieben (PGM statt PNG). Im Stapellauf lief dieser eine Schritt über 20 Sekunden je Dokument auf einem einzigen Kern, während Grafikkarte und die übrigen Kerne warteten. Kann `zbarimg` das Format nicht lesen, versucht nopaper es wie bisher mit PNG.
+
 ## 1.9.7
 
 - **Vorlauf mit mehreren Helfern** (E79): Drei Dokumente werden gleichzeitig geholt und erkannt statt eines, bis zu sechs liegen bereit. Anlass: Im Stapel stand die Grafikkarte 20 bis 40 Sekunden still, weil die Texterkennung eines mehrseitigen Scans länger dauert als die Modellarbeit an den Dokumenten davor. Einstellbar mit `"vorlauf": 1` bis `8` auf der obersten Ebene der Konfiguration.
