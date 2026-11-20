@@ -232,12 +232,22 @@ class Paperless:
 
     def mit_feldwerten(self, bedingungen: list[tuple[int, str]]) -> list[int]:
         """IDs der Dokumente, bei denen ALLE genannten benutzerdefinierten Felder genau den Wert haben
-        (Gross-/Kleinschreibung egal). Nutzt custom_field_query (paperless-ngx ab 2.13)."""
-        teile = [[fid, "iexact", wert] for fid, wert in bedingungen]
-        abfrage = teile[0] if len(teile) == 1 else ["AND", teile]
-        res = self.alle("documents", {"custom_field_query": json.dumps(abfrage, ensure_ascii=False),
-                                      "fields": "id", "truncate_content": "true"})
-        return [int(d["id"]) for d in res]
+        (Gross-/Kleinschreibung egal). Nutzt custom_field_query (paperless-ngx ab 2.13) nur in der einfachsten
+        Form – ein Feld, Operator "icontains" – und vergleicht selbst genau: paperless kennt fuer Text kein
+        "gleich ohne Gross-/Kleinschreibung", und die Schreibweise verknuepfter Bedingungen ist je Fassung
+        verschieden."""
+        fid0, wert0 = bedingungen[0]
+        res = self.alle("documents", {"custom_field_query": json.dumps([fid0, "icontains", wert0], ensure_ascii=False),
+                                      "fields": "id,custom_fields", "truncate_content": "true"})
+
+        def gleich(a, b) -> bool:
+            return str(a if a is not None else "").strip().lower() == str(b).strip().lower()
+        out = []
+        for d in res:
+            werte = {f.get("field"): f.get("value") for f in d.get("custom_fields") or []}
+            if all(gleich(werte.get(fid), wert) for fid, wert in bedingungen):
+                out.append(int(d["id"]))
+        return out
 
     def mit_tag(self, tag_id: int) -> list[int]:
         res = self.alle("documents", {"tags__id__all": str(tag_id), "fields": "id",
