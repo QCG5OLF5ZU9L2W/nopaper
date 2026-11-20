@@ -103,6 +103,7 @@ class Welt:
         self.dateinamen = []
         self.einordnung = "rechnung"
         self.positionen = []
+        self.kontexte = []
         self.extraktion = LLM_RECHNUNG
         self.bild_extraktion = None
         self.glaettung_kaputt = False
@@ -279,6 +280,7 @@ class Handler(BaseHTTPRequestHandler):
         system = req["messages"][0]["content"]
         user = req["messages"][1]["content"]
         W.llm_calls.append((req["model"], system[:20], bool(req["messages"][1].get("images"))))
+        W.kontexte.append((req["model"], system[:14], req["options"]["num_ctx"]))
         if system.startswith("Du liest die Positionen"):
             ans = {"positionen": W.positionen}
         elif system.startswith("Du korrigierst"):
@@ -1108,6 +1110,31 @@ class NopaperTest(unittest.TestCase):
         falsch = [dict(pos[0], menge=D("3")), pos[1]]
         self.assertEqual(p.pruefen(falsch, inv, text)[2], ["POSITIONEN_ZEILE_RECHNET_NICHT"])
         self.assertEqual(p.pruefen([], inv, text), ("keine", None, ["POSITIONEN_NICHT_GELESEN"]))
+
+    def test_glaettung_mit_kleinem_kontext(self):
+        # eigenes Glaettungsmodell: kleiner Kontext; die uebrigen Aufrufe behalten modelle.kontext
+        d = json.loads((self.tmp / "config.json").read_text())
+        d["modelle"]["kontext"] = 16384
+        d["modelle"]["glaettung"] = "klein:4b"
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        np = self.paperless_zuerst()
+        W.docs[93] = {"id": 93, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG ctx", "archive": b"A"}
+        np.ein_durchlauf()
+        glatt = {k for m, s, k in W.kontexte if s.startswith("Du korrigierst")}
+        rest = {k for m, s, k in W.kontexte if not s.startswith("Du korrigierst")}
+        self.assertEqual((glatt, rest), ({4096}, {16384}))
+
+    def test_glaettung_teilt_modell_behaelt_kontext(self):
+        d = json.loads((self.tmp / "config.json").read_text())
+        d["modelle"]["kontext"] = 16384
+        d["modelle"].pop("glaettung", None)
+        (self.tmp / "config.json").write_text(json.dumps(d))
+        np = self.paperless_zuerst()
+        W.docs[94] = {"id": 94, "content": "", "tags": [5], "custom_fields": [], "owner": None,
+                      "original": b"%PDF RECHNUNG ctx2", "archive": b"A"}
+        np.ein_durchlauf()
+        self.assertEqual({k for m, s, k in W.kontexte}, {16384})
 
     def test_fehlerantwort_nur_feldnamen(self):
         from nopaper.paperless import _fehlerschluessel

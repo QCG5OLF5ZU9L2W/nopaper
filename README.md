@@ -287,6 +287,21 @@ Erkannt wird mit festen Regeln, ohne Sprachmodell: Es zählt nur ein Datum, das 
 
 Das Feld ist eine Arbeitshilfe und ersetzt keine Fristenkontrolle: Liest die Texterkennung eine Ziffer falsch, steht der falsche Tag im Feld. Maßgeblich ist die Ladung selbst.
 
+## Grafikkarte: Modelle geladen lassen
+
+`install.sh` stellt Ollama so ein, dass immer nur ein Modell geladen ist. Das ist für Maschinen ohne Grafikkarte richtig. Auf einer Grafikkarte mit genug Speicher kostet es Zeit, weil Ollama bei jedem Wechsel zwischen Auslesen und Glätten neu lädt. Abhilfe ist eine eigene Datei, die `install.sh` und Updates nicht anfassen:
+
+```bash
+cat > /etc/systemd/system/ollama.service.d/30-gpu.conf <<'EOF'
+[Service]
+Environment="OLLAMA_MAX_LOADED_MODELS=3"
+Environment="OLLAMA_KEEP_ALIVE=30m"
+EOF
+systemctl daemon-reload && systemctl restart ollama
+```
+
+Passen die Modelle nicht gemeinsam in den Speicher, entlädt Ollama von selbst das am längsten unbenutzte. Was geladen ist, zeigt `ollama ps`. Rückgängig: die Datei löschen und dieselben zwei Befehle ausführen.
+
 ## Rechnungspositionen für die Warenwirtschaft
 
 Standardmäßig liest nopaper nur die Kopfdaten einer Rechnung. Mit
