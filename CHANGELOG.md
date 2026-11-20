@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Ältere Fassungen (1.0 bis 1.4.0) sind in `AGENTS.md` unter den Entscheidungen E1–E37 beschrieben.
 
+## 1.8.7
+
+- **Fortschritt im Protokoll:** Für jedes Dokument, das über einen Auslöser-Tag läuft, schreibt nopaper jetzt eine Zeile je Schritt (beginnt, Text erkannt, ausgelesen, Volltext-Weg) statt nur einer Zeile am Ende. Wie bisher nur Kennzahlen: Dokumentnummer, Zeichenzahl, Kategorie, Dauer.
+
 ## 1.8.6
 
 - **`nopaper check` prüft die Datentypen der Felder:** Hat ein Feld in paperless einen anderen Datentyp, als nopaper schreibt (etwa Text statt Datum), meldet `check` das als Fehler. Bisher fiel das erst beim Schreiben auf, mit `PAPERLESS_HTTP_400`.
