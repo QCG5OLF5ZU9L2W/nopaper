@@ -62,6 +62,24 @@ wer spricht).
 (Schwangerschaft, Dringlichkeit wie J4, J17) und – bei Terminwunsch – vorgesuchten Plätzen aus
 dem Kalender wie in johm. Status offen/erledigt. Keine Tonaufnahme wird gespeichert.
 
+**Sprachmodelle (Vorschlag vom 2026-11-27, nach Recherche, nicht getestet).** Kette aus
+Spracherkennung, vorhandenem Sprachmodell und Sprachausgabe statt eines Sprache-zu-Sprache-Modells:
+John braucht die Abschrift, feste Regeln und die Kalenderfunktionen, und Sprache-zu-Sprache-Modelle
+(Qwen-Omni) liefen lokal nach einem Bericht vom März 2026 nur ohne Sprachausgabe.
+- Spracherkennung: zuerst **Parakeet TDT 0.6B v3** (NVIDIA, CC BY 4.0, Deutsch, klein, schnell),
+  mit Sprechpausenerkennung. Alternative **Voxtral Mini 4B Realtime** (Mistral, Apache 2.0,
+  Streaming, braucht rund 16 GB Grafikspeicher). Rückfall **Whisper large-v3-turbo** (MIT).
+  Zu prüfen: **Nemotron 3.5 ASR** (Streaming, Juni 2026). Telefonaudio (8 kHz) verschlechtert
+  alle Modelle; Herstellerangaben gelten nicht für Telefonqualität.
+- Sprachausgabe: **Qwen3-TTS 0.6B** (Apache 2.0, Deutsch). Rückfall **Piper** mit deutscher Stimme
+  (GPL-3.0, CPU, hörbar synthetisch). Ausgeschlossen: Voxtral TTS (Gewichte nicht kommerziell),
+  Kokoro (kein Deutsch), Chatterbox (laut Bericht vom November 2026 eingestellt).
+- Feste Ansagen (Begrüßung, KI-Hinweis, 112/116117, Weiterleitung) werden vorab erzeugt und als
+  Datei abgespielt, damit sie auch ohne Grafikkarte kommen.
+- Keine geklonte Stimme einer echten Person; eine neutrale, erkennbar künstliche Stimme.
+- Auswahl erst nach einem Test über die echte Telefonleitung mit erfundenen Gesprächen, die das
+  Praxisteam einspricht (keine Patientengespräche als Testdaten).
+
 ## 4. Offene Punkte
 
 1. **Bestätigung der Reservierung (V4):** Bis ein SMS-Versand besteht, bestätigt die MFA in johv. Danach: SMS mit Termin und Bitte um Antwort „JA“? Dafür müsste John SMS-Antworten lesen (johm Abschnitt 8, Punkt 1).
