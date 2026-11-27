@@ -1,8 +1,8 @@
 """
 title: Praxiskalender (Johm)
 author: Praxis
-version: 2.0
-description: Liest den Nextcloud-Praxiskalender über Johm. Nur lesend, keine Reservierung und keine Buchung.
+version: 3.0
+description: Liest den Nextcloud-Praxiskalender über Johm und trägt nach Bestätigung im Dialog Patientinnen und Patienten in freie Plätze ein.
 """
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -100,6 +100,26 @@ def period(von, bis, today):
     return start, end
 
 
+def one_day(text, today):
+    """A single day for an entry: JJJJ-MM-TT, TT.MM.(JJ)JJ, heute, morgen, Wochentag."""
+    t = " ".join(str(text or "").split())
+    m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})", t)
+    if m:
+        year = int(m[3]) + (2000 if len(m[3]) == 2 else 0)
+        return dt.date(year, int(m[2]), int(m[1]))
+    first, last = period(t, t, today)
+    if first != last:
+        raise ValueError(f"Bitte einen einzelnen Tag angeben, nicht „{text}“.")
+    return first
+
+
+def clock(text):
+    m = re.fullmatch(r"\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:uhr)?\s*", str(text or "").casefold())
+    if not m or int(m[1]) > 23 or int(m[2] or 0) > 59:
+        raise ValueError(f"Uhrzeit nicht verstanden: {text}")
+    return f"{int(m[1]):02d}:{int(m[2] or 0):02d}"
+
+
 class Tools:
     class Valves(BaseModel):
         johm_url: str = Field(
@@ -189,3 +209,91 @@ class Tools:
         note = " Die Liste ist gekürzt, bitte den Zeitraum verkleinern." if result.get("truncated") else ""
         return (f"{head}, {result['count']} Einträge.{note}\n" + "\n".join(lines)
                 + "\nNur diese Einträge wiedergeben, nichts ergänzen. Reservieren und buchen geht nur im Mailarbeitsplatz.")
+
+    async def termin_eintragen(
+        self,
+        name: str,
+        datum: str,
+        uhrzeit: str,
+        arzt: str = "",
+        art: str = "",
+        telefon: str = "",
+        sms: str = "",
+        __user__: dict = None,
+        __event_call__=None,
+    ) -> str:
+        """
+        Trägt eine Patientin oder einen Patienten in einen freien Platz des Praxiskalenders ein. Nur verwenden, wenn
+        ausdrücklich ein Eintrag gewünscht ist. Vor dem Schreiben erscheint ein Bestätigungsdialog; ohne Bestätigung
+        wird nichts eingetragen. Werte so übergeben, wie sie gesagt wurden.
+        :param name: Vor- und Nachname der Patientin oder des Patienten.
+        :param datum: Tag wie gesagt, z. B. "14.01.2027", "14.01.27", "morgen", "Montag".
+        :param uhrzeit: Uhrzeit wie gesagt, z. B. "13:00" oder "13 Uhr".
+        :param arzt: Name der Ärztin oder des Arztes, falls genannt.
+        :param art: Terminraster, falls genannt (Titel vor dem Doppelpunkt). Sonst leer.
+        :param telefon: Telefonnummer, falls genannt. Sonst leer.
+        :param sms: "ja" oder "nein", nur wenn eine SMS-Erinnerung ausdrücklich gewünscht oder abgelehnt wurde.
+        """
+        if not self.valves.johm_key:
+            return "Das Kalender-Werkzeug ist nicht eingerichtet: In den Einstellungen des Werkzeugs fehlt der Schlüssel."
+        if __event_call__ is None:
+            return "Eintragen ist hier nicht möglich, weil keine Bestätigung angezeigt werden kann. Bitte im Kalender eintragen."
+        today = dt.datetime.now(ZoneInfo(self.valves.zeitzone)).date()
+        try:
+            day = one_day(datum, today)
+            at = clock(uhrzeit)
+        except ValueError as error:
+            return f"{error} Bitte Datum und Uhrzeit genauer angeben."
+        user = __user__ or {}
+        body = {"name": name, "datum": day.isoformat(), "uhrzeit": at, "arzt": arzt, "art": art, "telefon": telefon, "sms": sms}
+
+        def post(data):
+            request = urllib.request.Request(
+                self.valves.johm_url.rstrip("/") + "/intern/kalender/eintragen",
+                data=json.dumps(data).encode(),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Johm-Key": self.valves.johm_key,
+                    "X-Johm-User-Id": str(user.get("id", "")),
+                    "X-Johm-User-Email": str(user.get("email", "")),
+                    "X-Johm-User-Role": str(user.get("role", "")),
+                },
+            )
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=60) as response:
+                return json.load(response)
+
+        async def call(data):
+            try:
+                return await asyncio.to_thread(post, data), None
+            except urllib.error.HTTPError as error:
+                return None, error.read(400).decode("utf-8", "replace")
+            except (OSError, ValueError):
+                return None, "Der Praxiskalender ist nicht erreichbar."
+
+        found, problem = await call(dict(body, schritt="pruefen"))
+        if problem:
+            return f"Nicht eingetragen: {problem}"
+        if found["status"] == "mehrdeutig":
+            return found["text"] + "\n" + "\n".join(found["optionen"]) + "\nNichts eingetragen."
+        if found["status"] == "belegt":
+            alternatives = ", ".join(found.get("frei_am_tag") or []) or "keine"
+            return found["text"] + f" Freie Plätze an diesem Tag: {alternatives}. Nichts eingetragen."
+        if found["status"] != "frei":
+            return "Unerwartete Antwort des Praxiskalenders. Nichts eingetragen."
+        details = [found["text"], f"Eintrag: {found['titel']}"]
+        if telefon:
+            details.append(f"Telefon: {telefon}")
+        if sms:
+            details.append(f"SMS-Erinnerung: {sms}")
+        confirmed = await __event_call__({
+            "type": "confirmation",
+            "data": {"title": "Termin eintragen?", "message": "\n".join(details)},
+        })
+        if confirmed is not True:
+            return "Abgebrochen. Es wurde nichts eingetragen."
+        done, problem = await call(dict(body, schritt="eintragen", id=found["id"]))
+        if problem:
+            return f"Nicht eingetragen: {problem}"
+        return "Eingetragen: " + done["text"] + ". Der Eintrag steht im Nextcloud-Kalender."

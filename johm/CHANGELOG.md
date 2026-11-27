@@ -1,6 +1,12 @@
 # Änderungen – Johm Kalender
 
-Neueste Fassung zuerst. Die Nummern J1–J32 verweisen auf die Entscheidungen in `AGENTS.md`.
+Neueste Fassung zuerst. Die Nummern J1–J33 verweisen auf die Entscheidungen in `AGENTS.md`.
+
+## 0.5.0 (2026-11-27)
+
+Auf Anweisung des Verantwortlichen. Offline geprüft, nicht an einem echten Open WebUI.
+
+- **Termine aus dem Chat eintragen** (J33): Kalender-Werkzeug 3.0 mit `termin_eintragen`, Bestätigungsdialog in Open WebUI, neuer Aufruf `POST /intern/kalender/eintragen` im Mailarbeitsplatz.
 
 ## 0.4.1 (2026-11-27)
 

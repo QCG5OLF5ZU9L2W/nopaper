@@ -9,6 +9,7 @@ import json
 import os
 import re
 import ssl
+import time
 import uuid
 import transfer
 import review
@@ -352,7 +353,7 @@ def discuss(item,p):
 @web.middleware
 async def guard(req,handler):
     try:
-        if req.method=="POST":
+        if req.method=="POST" and not req.path.startswith("/intern/"):
             if req.headers.get("Origin") not in {"https://"+h for h in HOSTS} or req.content_type!="application/json":
                 raise web.HTTPForbidden(text="Ungültiger Ursprung.")
         if req.path in ("/johm/","/johnmail/"):
@@ -362,7 +363,7 @@ async def guard(req,handler):
             if len(visible)==1:return web.HTTPFound("/johm/b/"+visible[0]["id"]+"/",headers={"Cache-Control":"no-store"})
             links="".join('<li><a href="/johm/b/'+box["id"]+'/">'+html.escape(box["config"]["sender"])+'</a></li>' for box in visible)
             res=web.Response(content_type="text/html",text='<!doctype html><html lang="de"><meta name="viewport" content="width=device-width"><meta charset="utf-8"><title>JohnMail</title><h1>Postfach auswählen</h1><ul>'+links+'</ul></html>')
-        elif req.path=="/intern/kalender":
+        elif req.path in ("/intern/kalender","/intern/kalender/eintragen"):
             # Local staff chat only: loopback, never through the reverse proxy, shared key.
             import hmac
             key=(Path(os.environ["CREDENTIALS_DIRECTORY"])/"chat-key").read_text().strip()
@@ -476,6 +477,85 @@ def calendar_overview(query,user):
     return {"count":len(lines),"truncated":len(lines)>400,"entries":lines[:400],"rows":out[:600],"doctors":chosen or names,
             "today":f"{days[today.weekday()]} {today:%d.%m.%Y}"}
 
+def calendar_enter(p,user):
+    """Staff in the local chat enter an appointment into a free raster slot. Two steps: check, then enter the slot
+    the check found. The chat tool asks the person in a dialog between the two; nothing is written without that."""
+    import datetime as dt
+    import secrets
+    from caldav_slots import instant
+    cfg=appointments.settings()
+    enabled=[v.casefold() for v in cfg["mailboxes"]]
+    if not any(boxes.allowed(user,box) and box["config"]["username"].casefold() in enabled for box in boxes.catalog().values()):
+        raise web.HTTPForbidden(text="Dieses Konto hat keinen Kalenderzugriff.")
+    if cfg.get("mode")!="live":raise ValueError("Vorschau aktiv: Eintragen ist ausgeschaltet.")
+    if not isinstance(p,dict):raise ValueError("Ungültige Anfrage.")
+    name=wording.full_name(str(p.get("name","")))
+    if not name:raise ValueError("Bitte Vor- und Nachnamen der Patientin oder des Patienten angeben.")
+    phone=str(p.get("telefon","") or "").strip()
+    if phone and not re.fullmatch(r"\+?[\d /().-]{5,32}",phone):raise ValueError("Telefonnummer ungültig.")
+    sms={"ja":"ja","nein":"nein"}.get(str(p.get("sms","")).casefold(),"offen")
+    try:
+        day=dt.date.fromisoformat(str(p.get("datum","")))
+        clock=dt.time.fromisoformat(str(p.get("uhrzeit","")))
+    except ValueError:
+        raise ValueError("Datum als JJJJ-MM-TT und Uhrzeit als HH:MM angeben.") from None
+    dav=appointments.client()
+    start=instant(dt.datetime.combine(day,clock),dav.zone)
+    days=("Mo","Di","Mi","Do","Fr","Sa","So")
+    if start<=time.time():
+        later=day.replace(year=day.year+1)
+        raise ValueError(f"{days[day.weekday()]} {day:%d.%m.%Y} {clock:%H:%M} liegt in der Vergangenheit."+
+                         (f" Gemeint ist vielleicht {days[later.weekday()]} {later:%d.%m.%Y}?" if instant(later,dav.zone)>time.time() else ""))
+    names=[d["name"] for d in appointments.doctors(cfg)]
+    wanted=flat_name(p.get("arzt",""))
+    chosen=[n for n in names if wanted and (wanted in flat_name(n) or flat_name(n) in wanted)]
+    if wanted and not chosen:raise ValueError("Ärztin oder Arzt nicht gefunden. Bekannt sind: "+", ".join(names)+".")
+    kind=str(p.get("art","")).strip().rstrip(":").casefold()
+    def fits(s):
+        doctor=appointments.doctor_of(cfg,s["title"],s["label"]) or s["label"]
+        if chosen and doctor not in chosen:return False
+        if kind and s["title"].rstrip(":") not in (kind,"s"+kind):return False
+        return True
+    raster=lambda s:next((t.strip() for t in cfg["free_titles"] if t.strip().casefold()==s["title"]),s["title"])
+    def describe(s):
+        a=dt.datetime.fromtimestamp(s["start"],dav.zone);b=dt.datetime.fromtimestamp(s["end"],dav.zone)
+        return f"{days[a.weekday()]} {a:%d.%m.%Y %H:%M}–{b:%H:%M} · {appointments.doctor_of(cfg,s['title'],s['label']) or s['label']} · {raster(s)}"
+    begin=instant(day,dav.zone)
+    free=[s for s in dav.scan(begin,begin+86400) if fits(s)]
+    exact=[s for s in free if s["start"]==start]
+    if p.get("schritt")=="eintragen":
+        slot=next((s for s in exact if s["id"]==p.get("id")),None)
+        if not slot:raise ValueError("Der Platz ist inzwischen nicht mehr frei. Bitte neu prüfen.")
+        code=secrets.token_hex(5).upper()
+        who=str(user.get("email") or user.get("id") or "Chat")[:80]
+        try:
+            digest=dav.change(slot,code,"hold",name=name,until="sofort")
+        except Exception:
+            raise ValueError("Der Kalender hat den Eintrag abgelehnt. Bitte im Kalender prüfen.") from None
+        try:
+            dav.change(slot,code,"book",name=name,phone=phone,sms=sms,expected=digest,
+                       note=f"Eingetragen im Chat von {who} am {dt.datetime.now(dav.zone):%d.%m.%Y %H:%M}")
+        except Exception:
+            try:dav.change(slot,code,"release",expected=digest)
+            except Exception:pass
+            raise ValueError("Eintrag unvollständig. Bitte den Termin im Kalender prüfen.") from None
+        print("Chat-Eintrag: gebucht",flush=True)
+        return {"status":"eingetragen","text":describe(slot)+" · "+name}
+    if len(exact)==1:
+        s=exact[0]
+        return {"status":"frei","id":s["id"],"text":describe(s),"titel":raster(s)+" "+name}
+    if len(exact)>1:
+        return {"status":"mehrdeutig","optionen":[describe(s) for s in exact],
+                "text":"Zu dieser Zeit sind mehrere Plätze frei. Bitte Ärztin oder Arzt bzw. Terminart angeben."}
+    others=[dt.datetime.fromtimestamp(s["start"],dav.zone).strftime("%H:%M")+" ("+(appointments.doctor_of(cfg,s["title"],s["label"]) or s["label"])+")" for s in free][:24]
+    return {"status":"belegt","text":f"Um {clock:%H:%M} ist am {days[day.weekday()]} {day:%d.%m.%Y} kein passender Platz frei.",
+            "frei_am_tag":others}
+
+async def chat_enter(req):
+    user={"id":req.headers.get("X-Johm-User-Id",""),"email":req.headers.get("X-Johm-User-Email",""),"role":req.headers.get("X-Johm-User-Role",""),"name":""}
+    if req.content_length is not None and req.content_length>4000:raise ValueError("Anfrage zu groß.")
+    return web.json_response(await asyncio.to_thread(calendar_enter,await req.json(),user))
+
 async def chat_calendar(req):
     user={"id":req.headers.get("X-Johm-User-Id",""),"email":req.headers.get("X-Johm-User-Email",""),"role":req.headers.get("X-Johm-User-Role",""),"name":""}
     return web.json_response(await asyncio.to_thread(calendar_overview,dict(req.query),user))
@@ -575,6 +655,7 @@ def make_app():
     for path in ("/johnmail","/johnmail/","/johm","/johm/","/praxis-mail","/praxis-mail/"):
         app.router.add_get(path,landing)
     app.router.add_get("/intern/kalender",chat_calendar)
+    app.router.add_post("/intern/kalender/eintragen",chat_enter)
     for prefix in ("/johm","/johnmail"):
         app.router.add_route("*",prefix+"/b/{boxid}/api/{action}",route)
         app.router.add_get(prefix+"/b/{boxid}/{name:.*}",page)

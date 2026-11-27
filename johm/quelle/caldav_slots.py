@@ -265,7 +265,7 @@ class DAV:
         raw,_=self.request("GET",self.url(slot["cal"],slot["href"]))
         return any(str(e.get("X-JOHM-CODE",""))==code and hashlib.sha256(e.to_ical()).hexdigest()==expected
                    for e in Calendar.from_ical(raw).walk("VEVENT"))
-    def change(self,slot,code,action,name="",phone="",sms="offen",until="",expected=""):
+    def change(self,slot,code,action,name="",phone="",sms="offen",until="",expected="",note=""):
         url=self.url(slot["cal"],slot["href"])
         raw,headers=self.request("GET",url)
         tag=headers.get("ETag","")
@@ -306,7 +306,7 @@ class DAV:
             ev.pop("SUMMARY",None);ev.add("SUMMARY",title if action=="release" else f"{title} {name}")
             if action=="book":
                 desc=str(ev.get("DESCRIPTION",""))
-                ev.pop("DESCRIPTION",None);ev.add("DESCRIPTION",(desc+"\n" if desc else "")+f"Telefon: {phone or 'bitte nachreichen'}\nSMS-Erinnerung: {sms}")
+                ev.pop("DESCRIPTION",None);ev.add("DESCRIPTION",(desc+"\n" if desc else "")+f"Telefon: {phone or 'bitte nachreichen'}\nSMS-Erinnerung: {sms}"+("\n"+note if note else ""))
         ev.pop("DTSTAMP",None);ev.add("DTSTAMP",datetime.now(UTC).replace(microsecond=0))
         digest=fingerprint()
         self.request("PUT",url,cal.to_ical(),{"If-Match":tag,"Content-Type":"text/calendar; charset=utf-8"})

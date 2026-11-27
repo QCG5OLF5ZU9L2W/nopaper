@@ -840,12 +840,92 @@ class ChatWerkzeug(unittest.TestCase):
         self.assertEqual(self.zeit(""), ("2026-11-27", "2026-12-03"))
         self.assertEqual(self.zeit("nächsten Monat"), ("2026-12-01", "2026-12-31"))
 
+    def test_eintrag_tag_und_uhrzeit(self):
+        heute = dt.date(2026, 11, 27)
+        self.assertEqual(self.W.one_day("14.01.26", heute).isoformat(), "2026-01-14")
+        self.assertEqual(self.W.one_day("14.01.2027", heute).isoformat(), "2027-01-14")
+        self.assertEqual(self.W.one_day("Montag", heute).isoformat(), "2026-11-30")
+        with self.assertRaises(ValueError):
+            self.W.one_day("nächste Woche", heute)
+        self.assertEqual([self.W.clock(t) for t in ("13:00", "13 Uhr", "9.30", "8")], ["13:00", "13:00", "09:30", "08:00"])
+        with self.assertRaises(ValueError):
+            self.W.clock("25:00")
+
     def test_grenzen(self):
         self.assertEqual(self.zeit("2026-12-01", "2027-03-01")[1], "2027-01-01")
         with self.assertRaises(ValueError):
             self.zeit("irgendwann")
         with self.assertRaises(ValueError):
             self.zeit("2026-12-10", "2026-12-01")
+
+
+class ChatEintragen(unittest.TestCase):
+    """Eintragen aus dem Chat: Prüfung, Bestätigung, Schreiben in einen freien Platz."""
+
+    def setUp(self):
+        import ast
+        quelle = (ROOT / "quelle" / "desk.py").read_text(encoding="utf-8")
+        baum = ast.parse(quelle)
+        teile = [n for n in baum.body if isinstance(n, ast.FunctionDef) and n.name in ("flat_name", "calendar_enter")]
+        self.schreiben = []
+        test = self
+        start = stempel(2027, 1, 14, 13, 0)
+
+        class Dav:
+            zone = ZONE
+
+            def scan(self, a, b):
+                return [dict(id="p1", title="termin:", label="A", start=start, end=start + 900, cal="termine_a"),
+                        dict(id="p2", title="termin:", label="A", start=start + 900, end=start + 1800, cal="termine_a"),
+                        dict(id="p3", title="stermin:", label="B", start=start + 3600, end=start + 4500, cal="termine_b")]
+
+            def change(self, slot, code, action, **werte):
+                test.schreiben.append((slot["id"], action, werte.get("name"), werte.get("phone"), werte.get("note", "")))
+                return "fp"
+
+        cfg = dict(CFG, mode="live")
+        self.ns = {"re": __import__("re"), "time": types.SimpleNamespace(time=lambda: JETZT.timestamp()), "wording": wording,
+                   "web": types.SimpleNamespace(HTTPForbidden=PermissionError),
+                   "boxes": types.SimpleNamespace(catalog=lambda: {"1": {"config": {"username": "praxis@example.org"}}}, allowed=lambda u, b: True),
+                   "appointments": types.SimpleNamespace(settings=lambda: cfg, client=lambda: Dav(), doctors=A.doctors, doctor_of=A.doctor_of),
+                   "print": lambda *a, **k: None}
+        exec(compile(ast.Module(body=teile, type_ignores=[]), "desk.py", "exec"), self.ns)
+
+    def eintragen(self, **werte):
+        anfrage = dict({"name": "Erika Beispiel", "datum": "2027-01-14", "uhrzeit": "13:00"}, **werte)
+        return self.ns["calendar_enter"](anfrage, {"email": "mfa@example.org"})
+
+    def test_pruefen_schreibt_nichts_eintragen_bucht(self):
+        gefunden = self.eintragen()
+        self.assertEqual((gefunden["status"], gefunden["id"], gefunden["titel"]), ("frei", "p1", "Termin: Erika Beispiel"))
+        self.assertIn("Do 14.01.2027 13:00–13:15 · Dr. Beispiel", gefunden["text"])
+        self.assertEqual(self.schreiben, [])
+        fertig = self.eintragen(schritt="eintragen", id="p1", telefon="030 000000")
+        self.assertEqual(fertig["status"], "eingetragen")
+        self.assertEqual([(s[0], s[1]) for s in self.schreiben], [("p1", "hold"), ("p1", "book")])
+        self.assertEqual(self.schreiben[1][2:4], ("Erika Beispiel", "030 000000"))
+        self.assertIn("Eingetragen im Chat von mfa@example.org", self.schreiben[1][4])
+
+    def test_falsche_kennung_wird_nicht_gebucht(self):
+        with self.assertRaisesRegex(ValueError, "nicht mehr frei"):
+            self.eintragen(schritt="eintragen", id="p2")
+        self.assertEqual(self.schreiben, [])
+
+    def test_belegte_zeit_nennt_freie_plaetze_des_tages(self):
+        antwort = self.eintragen(uhrzeit="12:00")
+        self.assertEqual(antwort["status"], "belegt")
+        self.assertEqual(antwort["frei_am_tag"], ["13:00 (Dr. Beispiel)", "13:15 (Dr. Beispiel)", "14:00 (Dr. Muster)"])
+
+    def test_arzt_filter_und_unbekannter_arzt(self):
+        self.assertEqual(self.eintragen(uhrzeit="13:00", arzt="Muster")["status"], "belegt")
+        with self.assertRaisesRegex(ValueError, "Bekannt sind: Dr. Beispiel, Dr. Muster"):
+            self.eintragen(arzt="Dr. Niemand")
+
+    def test_vergangenheit_und_name_werden_geprueft(self):
+        with self.assertRaisesRegex(ValueError, "Vergangenheit. Gemeint ist vielleicht Do 14.01.2027"):
+            self.eintragen(datum="2026-01-14")
+        with self.assertRaisesRegex(ValueError, "Vor- und Nachnamen"):
+            self.eintragen(name="Erika")
 
 if __name__ == "__main__":
     unittest.main()
