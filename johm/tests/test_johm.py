@@ -871,13 +871,22 @@ class ChatEintragen(unittest.TestCase):
         test = self
         start = stempel(2027, 1, 14, 13, 0)
 
+        plaetze = [dict(id="p0", title="schwanger:", label="A", start=start - 3600, end=start - 2700, cal="termine_a"),
+                   dict(id="p1", title="termin:", label="A", start=start, end=start + 900, cal="termine_a"),
+                   dict(id="p2", title="termin:", label="A", start=start + 900, end=start + 1800, cal="termine_a"),
+                   dict(id="p3", title="stermin:", label="B", start=start + 3600, end=start + 4500, cal="termine_b")]
+
         class Dav:
             zone = ZONE
+            cfg = dict(CFG, mode="live")
+
+            def agenda(self, a, b):
+                return [{"title": "Schwanger:" if p["id"] == "p0" else p["title"].capitalize().replace("Stermin", "sTermin"),
+                         "free": True, "start": p["start"]} for p in plaetze]
 
             def scan(self, a, b):
-                return [dict(id="p1", title="termin:", label="A", start=start, end=start + 900, cal="termine_a"),
-                        dict(id="p2", title="termin:", label="A", start=start + 900, end=start + 1800, cal="termine_a"),
-                        dict(id="p3", title="stermin:", label="B", start=start + 3600, end=start + 4500, cal="termine_b")]
+                erlaubt = {t.strip().casefold() for t in self.cfg["free_titles"]}
+                return [dict(p) for p in plaetze if p["title"] in erlaubt]
 
             def change(self, slot, code, action, **werte):
                 test.schreiben.append((slot["id"], action, werte.get("name"), werte.get("phone"), werte.get("note", "")))
@@ -912,9 +921,14 @@ class ChatEintragen(unittest.TestCase):
         self.assertEqual(self.schreiben, [])
 
     def test_belegte_zeit_nennt_freie_plaetze_des_tages(self):
-        antwort = self.eintragen(uhrzeit="12:00")
+        antwort = self.eintragen(uhrzeit="11:00")
         self.assertEqual(antwort["status"], "belegt")
-        self.assertEqual(antwort["frei_am_tag"], ["13:00 (Dr. Beispiel)", "13:15 (Dr. Beispiel)", "14:00 (Dr. Muster)"])
+        self.assertEqual(antwort["frei_am_tag"], ["12:00 Schwanger: (Dr. Beispiel)", "13:00 Termin: (Dr. Beispiel)", "13:15 Termin: (Dr. Beispiel)", "14:00 sTermin: (Dr. Muster)"])
+
+    def test_jedes_freie_raster_des_tages_ist_eintragbar(self):
+        # "Schwanger:" steht nicht in free_titles, ist aber ein unberührter Rasterplatz.
+        gefunden = self.eintragen(uhrzeit="12:00")
+        self.assertEqual((gefunden["status"], gefunden["titel"]), ("frei", "Schwanger: Erika Beispiel"))
 
     def test_arzt_filter_und_unbekannter_arzt(self):
         self.assertEqual(self.eintragen(uhrzeit="13:00", arzt="Muster")["status"], "belegt")

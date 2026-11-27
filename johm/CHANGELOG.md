@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Die Nummern J1–J33 verweisen auf die Entscheidungen in `AGENTS.md`.
 
+## 0.5.1 (2026-11-27)
+
+- **Eintragen aus dem Chat in jedes freie Raster** (J33): Bisher nur in die Raster aus `free_titles`; ein freies Schwangeren-Raster galt als belegt. Die Liste freier Zeiten nennt jetzt das Raster mit.
+
 ## 0.5.0 (2026-11-27)
 
 Auf Anweisung des Verantwortlichen. Offline geprüft, nicht an einem echten Open WebUI.

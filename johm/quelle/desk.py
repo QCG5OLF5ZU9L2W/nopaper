@@ -521,6 +521,11 @@ def calendar_enter(p,user):
         a=dt.datetime.fromtimestamp(s["start"],dav.zone);b=dt.datetime.fromtimestamp(s["end"],dav.zone)
         return f"{days[a.weekday()]} {a:%d.%m.%Y %H:%M}–{b:%H:%M} · {appointments.doctor_of(cfg,s['title'],s['label']) or s['label']} · {raster(s)}"
     begin=instant(day,dav.zone)
+    # The MFA may use every untouched raster of the day (e.g. also pregnancy or online slots), not only the
+    # types John offers by mail. The kinds are read from the calendar itself.
+    rasters={r["title"] for r in dav.agenda(begin,begin+86400) if r["free"]}
+    dav.cfg=dict(dav.cfg,free_titles=list(dav.cfg["free_titles"])+sorted(rasters))
+    cfg=dav.cfg
     free=[s for s in dav.scan(begin,begin+86400) if fits(s)]
     exact=[s for s in free if s["start"]==start]
     if p.get("schritt")=="eintragen":
@@ -547,7 +552,7 @@ def calendar_enter(p,user):
     if len(exact)>1:
         return {"status":"mehrdeutig","optionen":[describe(s) for s in exact],
                 "text":"Zu dieser Zeit sind mehrere Plätze frei. Bitte Ärztin oder Arzt bzw. Terminart angeben."}
-    others=[dt.datetime.fromtimestamp(s["start"],dav.zone).strftime("%H:%M")+" ("+(appointments.doctor_of(cfg,s["title"],s["label"]) or s["label"])+")" for s in free][:24]
+    others=[dt.datetime.fromtimestamp(s["start"],dav.zone).strftime("%H:%M")+" "+raster(s)+" ("+(appointments.doctor_of(cfg,s["title"],s["label"]) or s["label"])+")" for s in free][:40]
     return {"status":"belegt","text":f"Um {clock:%H:%M} ist am {days[day.weekday()]} {day:%d.%m.%Y} kein passender Platz frei.",
             "frei_am_tag":others}
 
