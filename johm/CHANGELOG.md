@@ -1,6 +1,6 @@
 # Änderungen – Johm Kalender
 
-Neueste Fassung zuerst. Die Nummern J1–J27 verweisen auf die Entscheidungen in `AGENTS.md`.
+Neueste Fassung zuerst. Die Nummern J1–J30 verweisen auf die Entscheidungen in `AGENTS.md`.
 
 ## 0.2.0 (2026-11-27)
 
