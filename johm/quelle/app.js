@@ -90,7 +90,10 @@ async function loadList(){
 }
 function pregnancy(state,text){
   const banner=el("pregflag");banner.dataset.state=state;banner.textContent=text;banner.hidden=!text;
+  banner.style.borderLeft="";
 }
+// Colours come from the calendar and are set as style properties only, never as markup.
+function paint(node,color,width){if(color)node.style.borderLeft=(width||5)+"px solid "+color;}
 async function loadReading(source){
   const pane=el("translation"), output=el("translated");
   pane.hidden=false;output.textContent="John prüft die Sprache und übersetzt bei Bedarf …";
@@ -169,7 +172,7 @@ el("send").onclick=()=>task(async()=>{
   const text=editableBase();
   if([...picks.values()].some(row=>row.preview)){notice("Vorschau: Der markierte Platz kann erst im Livebetrieb reserviert und versendet werden.");return;}
   if(!item || !text.trim()){notice("Bitte zuerst einen Antworttext eingeben.");return;}
-  if(!confirm("Antwort jetzt an "+item.to+" senden?"+(picks.size?" Dabei "+picks.size+" Termin(e) reservieren.":"")))return;
+  if(!confirm("Antwort jetzt an "+item.to+" senden?"+(picks.size?" Dabei "+picks.size+" Termin(e) reservieren"+([...picks.values()].some(p=>p.old)?" und den bisherigen Termin freigeben":"")+".":"")))return;
   const result=await api("send",{id:item.id,revision:item.revision,text,picks:[...picks.values()]});
   reset();
   notice(result.notice);
@@ -230,6 +233,7 @@ async function loadCalendar(source,days,override){
   try{
     const result=await api("appointments",{id:source.id,revision:source.revision,days,override:calOverride});
     if(version!==calRequest || item!==source)return;
+    if(result.urgent)paint(el("pregflag"),result.urgentColor,10);
     const starts=result.wishes.flatMap(w=>w.options.map(o=>o.start));
     calShown=starts.length?{first:Math.min(...starts),last:Math.max(...starts)}:null;
     if(!result.wishes.length){el("calstatus").textContent="Kein Terminanliegen erkannt. Bitte im Original gegenlesen.";return;}
@@ -240,9 +244,25 @@ async function loadCalendar(source,days,override){
       const heading=document.createElement("h4");
       heading.textContent=w.person+" · "+w.label+(w.hint?(w.hint.startsWith("Vorgabe")?" · ":" · Wunsch: ")+w.hint:"");
       section.append(heading);
+      let oldChoice=w.old_pick||"";
       if(w.action==="verschieben"){
-        const old=document.createElement("p");
-        old.textContent=!w.old?"Bisheriger Termin im Kalender nicht eindeutig gefunden. Bitte von Hand freigeben.":"Bisheriger Termin laut Kalender: "+w.old+(w.old_ref?". Er wird freigegeben, sobald die Patientin den neuen Termin bestätigt.":". Der Name passt nicht eindeutig, bitte nach der Bestätigung von Hand freigeben.");
+        const old=document.createElement("fieldset");old.className="oldpick";
+        const legend=document.createElement("legend");
+        legend.textContent=w.old_options.length?"Bisheriger Termin – wird beim Senden des Angebots freigegeben":"Bisheriger Termin im Kalender nicht gefunden. Bitte von Hand freigeben.";
+        old.append(legend);
+        const choices=w.old_options.map(o=>[o.id,o.label]);
+        if(choices.length)choices.push(["","keinen freigeben"]);
+        choices.forEach(([id,text])=>{
+          const label=document.createElement("label"),radio=document.createElement("input");
+          radio.type="radio";radio.name="old"+index;radio.checked=id===oldChoice;
+          radio.onchange=()=>{oldChoice=id;for(const pick of picks.values())if(pick.index===index)pick.old=id;};
+          label.append(radio," "+text);old.append(label);
+        });
+        if(w.old_options.length && !w.old_pick){
+          const note=document.createElement("p");note.className="hint";
+          note.textContent=w.old_options.length>1?"Mehrere Termine passen zum Namen. Bitte den richtigen wählen.":"Der Name passt nicht eindeutig. Bitte prüfen und auswählen.";
+          old.append(note);
+        }
         section.append(old);
       }
       if(!w.options.length){
@@ -268,7 +288,7 @@ async function loadCalendar(source,days,override){
           if(selected && picks.size>=10){el("calstatus").textContent="Maximal zehn Plätze pro Angebot.";return;}
           let base;
           try{base=editableBase();}catch(e){notice(e.message);return;}
-          if(selected)picks.set(option.id,{id:option.id,index,days:result.days,deadline:result.deadline,deadlineLabel:result.draftPhrases.deadline,name:name.value.trim(),label:option.label,start:option.start,person:w.person,kind:w.kind,year:w.year,preview:!result.live,override:calOverride});
+          if(selected)picks.set(option.id,{id:option.id,index,days:result.days,deadline:result.deadline,deadlineLabel:result.draftPhrases.deadline,name:name.value.trim(),label:option.label,start:option.start,person:w.person,kind:w.kind,year:w.year,old:oldChoice,preview:!result.live,override:calOverride});
           else picks.delete(option.id);
           applySlots(base,result.draftPhrases);
           for(const b of buttons.get(option.id))b.setAttribute("aria-pressed",String(selected));
@@ -277,7 +297,7 @@ async function loadCalendar(source,days,override){
         };
         const chip=(option,text)=>{
           const button=document.createElement("button");
-          button.type="button";button.textContent=text;
+          button.type="button";button.textContent=text;paint(button,option.color);
           button.title=option.label+(option.minutes?" ("+option.minutes+" Min)":"");
           button.setAttribute("aria-pressed","false");
           button.onclick=()=>toggle(option);

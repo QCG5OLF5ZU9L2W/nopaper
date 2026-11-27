@@ -39,6 +39,8 @@ def journal():
         name TEXT, recipient TEXT, mid TEXT, created INTEGER, deadline INTEGER, state TEXT, fingerprint TEXT)""")
     db.execute("CREATE TABLE IF NOT EXISTS reply_done(key TEXT PRIMARY KEY, seen INTEGER)")
     db.execute("CREATE TABLE IF NOT EXISTS notice(at INTEGER, text TEXT)")
+    # A move whose existing appointment was released when the offer went out. Only the time of that appointment.
+    db.execute("CREATE TABLE IF NOT EXISTS moved(source TEXT, old_when TEXT, at INTEGER, done INTEGER)")
     # Every state change of a reservation, written by the database itself. Codes and states only, no patient data.
     db.execute("CREATE TABLE IF NOT EXISTS history(at INTEGER, code TEXT, was TEXT, now TEXT)")
     db.execute("CREATE TRIGGER IF NOT EXISTS offer_created AFTER INSERT ON offer BEGIN INSERT INTO history VALUES(strftime('%s','now'),NEW.code,'',NEW.state); END")
@@ -223,20 +225,53 @@ Ohne Terminanliegen ist termine leer. Person ist eine kurze Rollenbezeichnung oh
                        "old_date":old_date,"old_time":old_time,"hint":" ".join(parts),"pregnant":pregnant})
     return result
 
-def find_old(dav,w,sender):
-    """The existing appointment a patient wants to move, looked up in the calendar by time and name."""
+_old={}
+
+def find_old(dav,w,sender,source=""):
+    """Existing appointments a patient may want to move, looked up in the calendar by name, with date and time if the mail gives them.
+    Returns candidates; "sure" marks the one that can be preselected. Without a date the next six months are searched."""
     from email.utils import parseaddr
-    if not w.get("old_date"):return None
-    day=dt.date.fromisoformat(w["old_date"])
-    begin=instant(day,dav.zone)
-    rows=[r for r in dav.agenda(begin,begin+86400) if r["raster"] and not r["free"] and begin<=r["start"]<begin+86400]
-    if w.get("old_time"):
-        rows=[r for r in rows if dt.datetime.fromtimestamp(r["start"],dav.zone).strftime("%H:%M")==w["old_time"]]
-    words=[part.casefold() for part in re.findall(r"[^\W\d_]{3,}",parseaddr(str(sender))[0])]
-    named=[r for r in rows if words and any(part in r["title"].casefold() for part in words)]
-    # Only a match by name is certain enough to free the entry automatically later.
-    if len(named)==1:return dict(named[0],named=True)
-    return dict(rows[0],named=False) if len(rows)==1 and w.get("old_time") else None
+    person=w.get("person","") if norm_name(w.get("person","")) not in ("absenderin","absender","patientin","patient") else ""
+    words=sorted({part.casefold() for part in re.findall(r"[^\W\d_]{3,}",parseaddr(str(sender))[0]+" "+person)})
+    key=(source,str(sender),w.get("old_date",""),w.get("old_time",""),tuple(words))
+    for stale in [k for k,(end,_) in _old.items() if end<=time.monotonic()]:del _old[stale]
+    if source and key in _old:return json.loads(_old[key][1])
+    score=lambda row:sum(1 for part in words if re.search(r"(?<![^\W\d_])"+re.escape(part)+r"(?![^\W\d_])",row["title"].casefold()))
+    now=int(time.time())
+    found=[]
+    if w.get("old_date"):
+        begin=instant(dt.date.fromisoformat(w["old_date"]),dav.zone)
+        rows=[r for r in dav.agenda(begin,begin+86400) if r["raster"] and not r["free"] and begin<=r["start"]<begin+86400]
+        if w.get("old_time"):
+            rows=[r for r in rows if dt.datetime.fromtimestamp(r["start"],dav.zone).strftime("%H:%M")==w["old_time"]]
+        named=[r for r in rows if score(r)]
+        # Only a match by name is certain enough to be preselected.
+        if len(named)==1:found=[dict(named[0],sure=True)]
+        elif named:found=[dict(r,sure=False) for r in named]
+        else:found=[dict(rows[0],sure=False)] if len(rows)==1 and w.get("old_time") else []
+    # No day in the mail, or nothing on the day it names: the next six months, by name.
+    if not found and words:
+        rows=[]
+        for step in range(3):
+            a=now+step*61*86400
+            rows+=[r for r in dav.agenda(a,a+61*86400) if r["raster"] and not r["free"] and a<=r["start"]<a+61*86400
+                   and not r["title"].casefold().startswith("reserviert")]
+        scored=[(score(r),r) for r in rows]
+        # First and last name in the title: certain if it is the only one. A single name part is only a hint.
+        full=[r for points,r in scored if points>=2]
+        part=[r for points,r in scored if points==1]
+        if full:found=[dict(r,sure=len(full)==1) for r in full]
+        else:found=[dict(r,sure=False) for r in part] if len(part)<=8 else []
+    found=sorted(found,key=lambda r:r["start"])[:8]
+    for r in found:
+        r["id"]=hashlib.sha256(json.dumps([r["path"],r["href"],r["start"],r["title"]]).encode()).hexdigest()[:16]
+    if source:
+        if len(_old)>=32:del _old[next(iter(_old))]
+        _old[key]=(time.monotonic()+120,json.dumps(found))
+    return found
+
+def norm_name(value):
+    return " ".join(str(value).casefold().split())
 
 CLOCK=r"(?:[01]\d|2[0-3]):[0-5]\d"
 
@@ -362,21 +397,24 @@ def search(ctx,days=None,override=None):
         # A period wished in the mail may lie beyond the usual window.
         if w.get("date_to") and w["kind"]!="manuell":
             until=max(until,instant(min(dt.date.fromisoformat(w["date_to"]),horizon)+dt.timedelta(days=1),dav.zone))
-        w["old"]="";w["old_ref"]=None
+        w["old_options"]=[];w["old_pick"]="";w["old_refs"]={}
         if w["action"]=="verschieben":
             try:
-                old=find_old(dav,w,ctx.get("sender",""))
+                found=find_old(dav,w,ctx.get("sender",""),ctx.get("source",""))
             except (OSError,ValueError,KeyError,TypeError) as error:
                 print("Bisheriger Termin:",type(error).__name__,flush=True)
-                old=None
-            if old:
+                found=[]
+            same=set()
+            for old in found:
+                if not old.get("href"):continue
                 at=dt.datetime.fromtimestamp(old["start"],dav.zone)
-                w["old"]=WEEKDAYS[at.weekday()]+at.strftime(" %d.%m.%Y %H:%M")+" · "+old["calendar"]+" · "+old["title"]
-                if old.get("named") and old.get("href"):w["old_ref"]={"cal":old["path"],"href":old["href"],"start":old["start"],"title":old["title"]}
-                # Without a named doctor the move stays with the doctor of the existing appointment.
+                w["old_options"].append({"id":old["id"],"label":WEEKDAYS[at.weekday()]+at.strftime(" %d.%m.%Y %H:%M")+" · "+old["calendar"]+" · "+old["title"]})
+                w["old_refs"][old["id"]]={"cal":old["path"],"href":old["href"],"start":old["start"],"title":old["title"]}
+                if old.get("sure"):w["old_pick"]=old["id"]
                 raster=re.match(r"\s*([^\s:]{1,12}:)",old["title"])
-                same=doctor_of(dav.cfg,raster.group(1).casefold() if raster else "",old["calendar"])
-                if same and not w.get("doctors") and not w.get("staff"):w["doctors"]=[same]
+                same.add(doctor_of(dav.cfg,raster.group(1).casefold() if raster else "",old["calendar"]))
+            # Without a named doctor the move stays with the doctor of the existing appointment.
+            if len(same)==1 and next(iter(same)) and not w.get("doctors") and not w.get("staff"):w["doctors"]=[next(iter(same))]
     if override is not None and (override["date_from"] or override["date_to"]):
         # A date range named by staff is the search window, also beyond the usual number of days.
         limit=today.date()+dt.timedelta(days=dav.cfg["max_days_mfa"])
@@ -395,6 +433,9 @@ def search(ctx,days=None,override=None):
             print("Kalenderabfrage:",type(error).__name__,getattr(error,"code",""),flush=True)
             raise ValueError("Der Nextcloud-Kalender hat nicht geantwortet oder die Abfrage abgelehnt"+(f" (HTTP {error.code})" if getattr(error,"code",None) else "")+".") from None
     for s in slots:s["doctor"]=doctor_of(dav.cfg,s["title"],s["label"])
+    # Urgent requests are shown in the colour the urgent raster has in the calendar.
+    urgent_titles={v.strip().casefold() for v in kinds(dav.cfg)[urgent]["free_titles"]} if urgent else set()
+    urgent_color=next((s.get("color","") for s in slots if s["title"] in urgent_titles and s.get("color")),"")
     declined=offered_before(ctx) if slots else set()
     skipped=any((s.get("cal"),s["start"]) in declined for s in slots)
     slots=[s for s in slots if (s.get("cal"),s["start"]) not in declined]
@@ -443,7 +484,7 @@ def search(ctx,days=None,override=None):
                 week=start.isocalendar()
                 w["options"].append({"id":s["id"],"label":WEEKDAYS[start.weekday()]+start.strftime(" %d.%m.%Y %H:%M")+" · "+(s["doctor"] or s["label"]),"start":s["start"],"minutes":(s["end"]-s["start"])//60,
                                      "doctor":s["doctor"] or s["label"],"date":start.date().isoformat(),"day":WEEKDAYS[start.weekday()]+start.strftime(" %d.%m."),"time":start.strftime("%H:%M"),
-                                     "weekday":start.isoweekday(),"pm":start.hour>=12,"kw":week[1],"week":f"{week[0]}-{week[1]:02d}"})
+                                     "weekday":start.isoweekday(),"pm":start.hour>=12,"kw":week[1],"week":f"{week[0]}-{week[1]:02d}","color":s.get("color","")})
         w["fallback"]=w["fallback"] and bool(w["options"])
     # The shortest confirmation time among the offered types applies to the whole offer.
     deadline=(int(time.time())+min([lead_hours(dav.cfg,w["kind"]) for w in wants if w["options"]] or [dav.cfg["hold_hours"]])*3600)//60*60
@@ -452,7 +493,7 @@ def search(ctx,days=None,override=None):
         phrases["salutation"]=wording.salutation(info["lang"],ctx.get("to",""))
         phrases["intro"]=wording.addressed(phrases["intro"],info["lang"],ctx.get("to",""))
         phrases["deadline"]=phrases["deadline"].format(deadline=dt.datetime.fromtimestamp(deadline,dav.zone).strftime("%d.%m.%Y %H:%M %Z"))
-    return {"deadline":deadline,"draftPhrases":phrases,"skipped":skipped,"capped":capped,"untranslated":info["lang"] in wording.FALLBACK,"pregnancy":info["pregnancy"],"wishes":wants,"days":days,"maxDays":dav.cfg["max_days_mfa"],"live":dav.cfg["mode"]=="live","lang":info["lang"]}
+    return {"deadline":deadline,"draftPhrases":phrases,"urgent":bool(urgent),"urgentColor":urgent_color,"skipped":skipped,"capped":capped,"untranslated":info["lang"] in wording.FALLBACK,"pregnancy":info["pregnancy"],"wishes":wants,"days":days,"maxDays":dav.cfg["max_days_mfa"],"live":dav.cfg["mode"]=="live","lang":info["lang"]}
 
 def availability_answer(ctx,days=None,override=None):
     if not enabled():return "Für dieses Postfach ist die Kalendersuche nicht aktiviert."
@@ -623,6 +664,14 @@ def prepare(picks,ctx,msg,recipient):
         if not any(s["id"]==p["id"] for s in w["options"]) or p["id"] in used:raise ValueError("Termin inzwischen belegt oder Suche geändert.")
         used.add(p["id"])
         selected.append((p,w))
+    # The existing appointment to give up is chosen by staff from what the calendar search found now, never taken from the browser.
+    give_up={}
+    for p,w in selected:
+        choice=p.get("old","")
+        if not choice:continue
+        if not isinstance(choice,str) or choice not in w.get("old_refs",{}):raise ValueError("Bisheriger Termin nicht mehr eindeutig. Bitte Termine neu suchen.")
+        give_up[choice]=w["old_refs"][choice]
+    old_times=[dt.datetime.fromtimestamp(ref["start"],dav.zone).strftime("%d.%m.%Y %H:%M") for ref in give_up.values()]
     lang=fresh["lang"]
     words=wording.template(lang)
     several=len({w["person"] for _,w in selected})>1
@@ -637,6 +686,18 @@ def prepare(picks,ctx,msg,recipient):
         nonlocal submitted
         submitted=True
         with db: db.executemany("UPDATE offer SET state='sent' WHERE code=?",[(r["code"],) for r in rows])
+        # The mail is out: the existing appointment is given up now, so the patient does not block two slots.
+        for ref,old_when in zip(give_up.values(),old_times):
+            try:freed=dav.free_entry(ref)
+            except Exception as error:
+                print("Bisheriger Termin:",type(error).__name__,flush=True)
+                freed=False
+            try:
+                with db:
+                    db.execute("INSERT INTO notice VALUES(?,?)",(int(time.time()),"Verlegung: bisheriger Termin am "+old_when+(" freigegeben." if freed else " konnte nicht freigegeben werden. Bitte im Kalender prüfen.")))
+                    if freed:db.execute("INSERT INTO moved VALUES(?,?,?,0)",(ctx["source"],old_when,int(time.time())))
+            except sqlite3.Error as error:
+                print("Bisheriger Termin:",type(error).__name__,flush=True)
     with contextlib.closing(journal()) as db:
         existing=db.execute("SELECT 1 FROM offer WHERE source=? AND state NOT IN ('released','closed')",(ctx["source"],)).fetchone()
         if existing:raise ValueError("Für diese Mail ist bereits ein Angebot registriert. Kalenderstatus prüfen.")
@@ -644,7 +705,7 @@ def prepare(picks,ctx,msg,recipient):
             for nr,((p,w),start) in enumerate(zip(selected,times)):
                 s=next((s for s in dav.scan(start,start+cfg["slot_minutes"]*60) if s["id"]==p["id"]),None)
                 if not s:raise ValueError("Termin inzwischen belegt.")
-                s=dict(s,old=w.get("old_ref"),doctor=doctor_of(cfg,s["title"],s["label"]) or s["label"],wish_index=p["index"],purpose=purposes[str(nr)],fields={"name":words["f_name"],"phone":words["f_phone"],"sms":words["f_sms"]},receipt={**{k:words[k] for k in ("subject","hello","bye","booked","missing","moved")},"greeting":wording.draft_phrases(lang)["greeting"]})
+                s=dict(s,doctor=doctor_of(cfg,s["title"],s["label"]) or s["label"],wish_index=p["index"],purpose=purposes[str(nr)],fields={"name":words["f_name"],"phone":words["f_phone"],"sms":words["f_sms"]},receipt={**{k:words[k] for k in ("subject","hello","bye","booked","missing","moved")},"greeting":wording.draft_phrases(lang)["greeting"]})
                 code=secrets.token_hex(5).upper()
                 label=w["person"]+" – "+w["label"]
                 name=clean(p.get("name",""),100)
@@ -666,12 +727,13 @@ def prepare(picks,ctx,msg,recipient):
             token="[[JOHM_TERMINE]]"
             before,after=original.split(token,1) if token in original else (original+"\n\n","")
             if not re.search(wording.CLOSING,original) and words["bye"].split("\n")[0] not in original:after=after.rstrip()+"\n\n"+words["bye"]
-            msg.set_content(before+offer_text(rows,dav.zone,words,contact_given)+after)
+            gone="".join("\n\n"+words["released"].format(when=item) for item in old_times) if words.get("released") else ""
+            msg.set_content(before+offer_text(rows,dav.zone,words,contact_given)+gone+after)
             # HTML part with one prepared confirmation mail per appointment. The plain part stays complete without links.
             import html
             from email.utils import parseaddr
             block=lambda part:html.escape(part).replace("\n","<br>\n")
-            msg.add_alternative("<html><body>"+block(before)+offer_html(rows,dav.zone,words,contact_given,parseaddr(str(msg["From"]))[1],wording.full_name(parseaddr(str(msg["To"]))[0]))+block(after)+"</body></html>",subtype="html")
+            msg.add_alternative("<html><body>"+block(before)+offer_html(rows,dav.zone,words,contact_given,parseaddr(str(msg["From"]))[1],wording.full_name(parseaddr(str(msg["To"]))[0]))+("<p>"+block(gone.strip())+"</p>" if gone else "")+block(after)+"</body></html>",subtype="html")
             with db:db.executemany("UPDATE offer SET state='submitting' WHERE code=?",[(r["code"],) for r in rows])
             try:yield accepted
             except Uncertain:
@@ -845,6 +907,14 @@ def maintain(mailbox):
                 db.execute("DELETE FROM reply_done WHERE seen<?",(now-604800,))
                 db.execute("DELETE FROM notice WHERE at<?",(now-604800,))
                 db.execute("DELETE FROM history WHERE at<?",(now-7776000,))
+                db.execute("DELETE FROM moved WHERE at<?",(now-604800,))
+                # A move whose old appointment is already free, and no new one was booked: the patient has none now.
+                for m in db.execute("SELECT rowid,* FROM moved WHERE done=0").fetchall():
+                    states=[r["state"] for r in db.execute("SELECT state FROM offer WHERE source=?",(m["source"],))]
+                    if "sent" in states:continue
+                    if "booked" not in states:
+                        db.execute("INSERT INTO notice VALUES(?,?)",(now,"Verlegung ohne neuen Termin: Der bisherige Termin am "+m["old_when"]+" ist freigegeben, einen neuen hat John nicht gebucht. Bitte prüfen, ob die Patientin einen Termin hat."))
+                    db.execute("UPDATE moved SET done=1 WHERE rowid=?",(m["rowid"],))
             rows=db.execute("SELECT * FROM offer WHERE state='sent' ORDER BY created").fetchall()
             if not rows:return
             dav=client()

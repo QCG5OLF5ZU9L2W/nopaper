@@ -26,3 +26,5 @@
 @media(max-width:800px){.week{grid-template-columns:1fr!important}.day{grid-column:auto!important}}
 
 #status{position:sticky;top:0;z-index:5;margin:0;padding:10px 4vw;background:#f5f7f6;border-bottom:1px solid #cddbd7;font-weight:600}
+
+.oldpick{border:1px solid #c9d6d3;border-radius:6px;margin:.4em 0 .8em;padding:.4em .8em}.oldpick label{display:block;margin:.2em 0}.oldpick legend{font-weight:600}

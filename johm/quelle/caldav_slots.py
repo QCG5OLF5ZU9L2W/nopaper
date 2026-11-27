@@ -52,6 +52,13 @@ def holidays(year,extra=()):
     return days
 
 MARKED=r"(?i)\b(?:absage|abgesagt|storno|storniert)\b"
+A="{http://apple.com/ns/ical/}"
+_colors={}
+
+def tint(value):
+    """A colour from the calendar, passed on only as #hex or a plain CSS colour name."""
+    value=str(value or "").strip()
+    return value if re.fullmatch(r"#[0-9a-fA-F]{3,8}|[A-Za-z]{3,30}",value) else ""
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):return None
@@ -122,6 +129,8 @@ class DAV:
                     slot=dict(title=norm(ev.get("X-JOHM-ORIGINAL",title)) if owned else title,cal=name,href=href,uid=str(ev["UID"]),rid=rid,start=a,end=b,label=entry["label"])
                     slot["id"]=hashlib.sha256(json.dumps(slot,sort_keys=True).encode()).hexdigest()
                     slot["etag"]=next((ps.findtext(D+"prop/"+D+"getetag") for ps in ok if ps.findtext(D+"prop/"+D+"getetag")),None)
+                    # After the id: the colour is display only and must not change which slot this is.
+                    slot["color"]=tint(ev.get("COLOR","")) or self.calendar_color(name)
                     slots.append(slot)
         candidates_by_day={}
         for item in slots:
@@ -130,6 +139,19 @@ class DAV:
         return [s for s in sorted(slots,key=lambda x:x["start"]) if start<=s["start"]<end and not self.closed(s["start"]) and
                 not any(s["start"]<b and a<s["end"] for a,b in blocked+busy[s["cal"]]) and
                 not any(other is not s and s["cal"]==other["cal"] and s["start"]<other["end"] and other["start"]<s["end"] for other in candidates_by_day.get((s["cal"],s["start"]//86400),[]))]
+    def calendar_color(self,name):
+        """Colour of the calendar in Nextcloud, remembered for ten minutes. Never a reason to fail."""
+        import time as clock
+        url=self.collection(name)
+        if url in _colors and _colors[url][0]>clock.monotonic():return _colors[url][1]
+        try:
+            xml=b'<d:propfind xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/"><d:prop><a:calendar-color/></d:prop></d:propfind>'
+            raw,_=self.request("PROPFIND",url,xml,{"Depth":"0","Content-Type":"application/xml"})
+            color=tint(ET.fromstring(raw).findtext(".//"+A+"calendar-color"))
+        except Exception:
+            color=""
+        _colors[url]=(clock.monotonic()+600,color)
+        return color
     def closed(self,ts):
         day=datetime.fromtimestamp(ts,self.zone).date()
         return day in holidays(day.year,tuple(self.cfg.get("extra_holidays",())))

@@ -109,7 +109,7 @@ install -m 0644 "$tmp/drop" "$drop.new"
 install -m 0644 "$tmp/worker" "$worker_drop.new"
 mv -f "$worker_drop.new" "$worker_drop"
 mv -f "$drop.new" "$drop"
-if ! (systemctl daemon-reload && systemctl restart "$service" && curl --noproxy '*' --retry 10 --retry-connrefused --retry-delay 1 -fsS --max-time 3 http://127.0.0.1:3301/johm >/dev/null && systemctl is-active --quiet "$service"); then
+if ! (systemctl daemon-reload && systemctl restart "$service" && curl --noproxy '*' --retry 10 --retry-connrefused --retry-delay 1 -fs --max-time 3 http://127.0.0.1:3301/johm >/dev/null && systemctl is-active --quiet "$service"); then
   journalctl -u "$service" -n 16 --no-pager >&2 || true
   if [[ -f "$tmp/previous-worker" ]]; then install -m 0644 "$tmp/previous-worker" "$worker_drop"; else rm -f "$worker_drop"; fi
   if [[ -f "$tmp/previous" ]]; then install -m 0644 "$tmp/previous" "$drop"; else rm -f "$drop"; fi

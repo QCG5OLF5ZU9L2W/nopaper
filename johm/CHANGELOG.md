@@ -2,6 +2,16 @@
 
 Neueste Fassung zuerst. Die Nummern J1–J27 verweisen auf die Entscheidungen in `AGENTS.md`.
 
+## 0.2.0 (2026-11-27)
+
+Auf Anweisung des Verantwortlichen. Nur offline und mit nachgestellter Oberfläche geprüft.
+
+- **Verlegung gibt den bisherigen Termin beim Senden des Angebots frei** statt erst bei der Bestätigung (J9 geändert). Die MFA wählt den Termin aus den Treffern oder „keinen freigeben“. Das Angebot nennt der Patientin die Freigabe. Endet das Angebot ohne Buchung, bekommt die MFA einen Hinweis.
+- **Bisheriger Termin ohne Datum:** Suche über sechs Monate nach dem Namen der Patientin (J28). Sie greift auch, wenn am genannten Tag nichts passt.
+- **Farben aus Nextcloud** an den Plätzen der Wochenansicht (J29); **dringende Anliegen** in der Farbe der Akut-Raster (J30).
+- **Installationsskript:** Die Meldung des ersten, zu frühen Versuchs der Startprüfung entfällt.
+- Namensteile zählen bei der Suche nach dem bisherigen Termin nur noch als ganze Wörter.
+
 ## 0.1.0 (2026-11-27)
 
 Erste Fassung im Repository. Sie fasst die Arbeit vom 2026-11-26 und 2026-11-27 zusammen. Geprüft

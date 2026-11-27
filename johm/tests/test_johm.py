@@ -173,6 +173,45 @@ class Suche(unittest.TestCase):
         self.assertEqual([(o["day"], o["time"]) for o in wunsch["options"]], [("Fr 27.11.", "13:00"), ("Mo 30.11.", "13:00")])
         self.assertEqual(ergebnis["deadline"], stempel(2026, 11, 27, 12, 0))
 
+    def test_farbe_aus_dem_kalender_und_akutfarbe(self):
+        self.merkmale = [{"id": "urgent", "state": "reported", "label": "Dringend", "evidence": "starke Schmerzen"}]
+        self.plaetze = [dict(platz("akut:", 2026, 11, 30, 13, 0), color="#cc0000"), dict(platz("termin:", 2026, 11, 30, 9, 0), color="green")]
+        ergebnis = self.suche()
+        self.assertEqual((ergebnis["urgent"], ergebnis["urgentColor"]), (True, "#cc0000"))
+        self.assertEqual([o["color"] for o in ergebnis["wishes"][0]["options"]], ["#cc0000"])
+        self.assertEqual((C.tint("#1a2B3c"), C.tint("red"), C.tint("red;background:url(x)"), C.tint("<b>")), ("#1a2B3c", "red", "", ""))
+
+    # --- Bisherigen Termin finden
+
+    def alter_termin(self, eintraege, **wunsch):
+        zeilen = [dict(start=stempel(*teile), end=stempel(*teile) + 900, title=titel, calendar="A", raster=True, free=titel.endswith(":"), path="termine_a", href=f"/{nr}.ics")
+                  for nr, (titel, teile) in enumerate(eintraege)]
+        abfragen = []
+        dav = types.SimpleNamespace(zone=ZONE, agenda=lambda a, b: abfragen.append((a, b)) or [dict(z) for z in zeilen if a <= z["start"] < b])
+        A._old.clear()
+        gefunden = A.find_old(dav, dict(A.blank_wish("Absenderin"), action="verschieben", **wunsch), "Erika Beispiel <e@example.org>")
+        return [(z["title"], z["sure"]) for z in gefunden], abfragen
+
+    def test_alter_termin_ohne_datum_wird_ueber_sechs_monate_gesucht(self):
+        gefunden, abfragen = self.alter_termin([("Termin: Erika Beispiel", (2027, 3, 9, 10, 0)), ("Termin: Max Muster", (2026, 12, 1, 9, 0)), ("Termin:", (2026, 12, 1, 9, 15))])
+        self.assertEqual(gefunden, [("Termin: Erika Beispiel", True)])
+        self.assertEqual(len(abfragen), 3)
+        self.assertGreaterEqual(abfragen[-1][1] - abfragen[0][0], 180 * 86400)
+
+    def test_alter_termin_mehrere_treffer_keiner_vorgewaehlt(self):
+        gefunden, _ = self.alter_termin([("Termin: Erika Beispiel", (2026, 12, 9, 10, 0)), ("Termin: Beispiel, Erika", (2027, 1, 12, 8, 0))])
+        self.assertEqual(gefunden, [("Termin: Erika Beispiel", False), ("Termin: Beispiel, Erika", False)])
+
+    def test_alter_termin_nur_nachname_ist_nur_ein_hinweis(self):
+        gefunden, _ = self.alter_termin([("Termin: Frau Beispiel", (2026, 12, 9, 10, 0)), ("Termin: Beispielmann", (2026, 12, 10, 10, 0))])
+        self.assertEqual(gefunden, [("Termin: Frau Beispiel", False)])
+
+    def test_alter_termin_mit_datum_und_falschem_tag_sucht_weiter(self):
+        eintraege = [("Termin: Erika Beispiel", (2026, 12, 9, 10, 0)), ("Termin: Max Muster", (2026, 12, 8, 10, 0))]
+        self.assertEqual(self.alter_termin(eintraege, old_date="2026-12-09")[0], [("Termin: Erika Beispiel", True)])
+        self.assertEqual(self.alter_termin(eintraege, old_date="2026-12-08")[0], [("Termin: Erika Beispiel", True)])
+        self.assertEqual(self.alter_termin(eintraege[1:], old_date="2026-12-08", old_time="10:00")[0], [("Termin: Max Muster", False)])
+
     def test_ungueltige_vorgaben_werden_verworfen(self):
         sauber = A.clean_override({"doctors": ["Dr. Beispiel", "Dr. Niemand"], "weekdays": [1, 9, True], "from": "25:00", "to": "10:00",
                                    "date_from": "2027-13-01", "date_to": "2027-01-31", "kind": "gibt-es-nicht"}, CFG)
@@ -323,7 +362,7 @@ class Antworten(unittest.TestCase):
         A.ack = bestaetigung
         A._retry.clear()
         with contextlib.closing(A.journal()) as db, db:
-            for tabelle in ("offer", "reply_done", "notice"):
+            for tabelle in ("offer", "reply_done", "notice", "moved"):
                 db.execute("DELETE FROM " + tabelle)
 
     def tearDown(self):
@@ -454,6 +493,87 @@ class Antworten(unittest.TestCase):
         A.maintain(self.postfach)
         self.assertEqual((self.stand(), self.hinweise()), ({self.M: "released"}, []))
         self.assertNotIn(("ALT", "Termin: Erika Beispiel"), self.kalender)
+
+    # --- Verlegung: Der bisherige Termin wird beim Senden des Angebots freigegeben.
+
+    def senden(self, alt="alt1", absenden=True):
+        """Stellt den Versand eines Angebots nach: ein gewählter Platz, dazu die Wahl des bisherigen Termins."""
+        test = self
+        start = stempel(2027, 1, 12, 9, 0)
+        platz_neu = dict(id="neu1", cal="termine_a", label="A", start=start, end=start + 900, title="termin:", href="/n.ics", uid="u", rid=start, etag='"e"')
+        dav = A.client()
+        dav.cfg = dict(CFG)
+        dav.scan = lambda a, b: [dict(platz_neu)]
+        A.client = lambda: dav
+        wunsch = dict(A.blank_wish("Absenderin"), kind="vorsorge", label="Vorsorge", action="verschieben",
+                      options=[{"id": "neu1", "start": start}], old_options=[{"id": "alt1", "label": "…"}], old_pick="alt1",
+                      old_refs={"alt1": {"cal": "termine_a", "href": "/x.ics", "start": stempel(2027, 2, 4, 10, 15), "title": "Termin: Erika Beispiel"}})
+        frist = int(time.time()) // 60 * 60 + 3600
+        alt_suche, A.search = A.search, lambda ctx, days, override: {"wishes": [wunsch], "lang": "de"}
+        alt_wechsel, type(dav).change = type(dav).change, lambda self, slot, code, action, **w: test.kalender.append((code, action)) or "fp"
+        nachricht = EmailMessage(policy=policy.default)
+        nachricht["From"], nachricht["To"], nachricht["Message-ID"] = "praxis@example.org", "Erika Beispiel <patientin@example.org>", "<neu@example.org>"
+        nachricht.set_content("Guten Tag Frau Beispiel,\n\n[[JOHM_TERMINE]]\n\nFreundliche Grüße\nIhr Praxisteam")
+        wahl = [{"id": "neu1", "index": 0, "days": 60, "deadline": frist, "person": "Absenderin", "kind": "vorsorge", "year": 0, "name": "", "old": alt}]
+        try:
+            with A.prepare(wahl, {"source": "9-9", "sender": "Erika Beispiel <patientin@example.org>"}, nachricht, "patientin@example.org") as angenommen:
+                vorher = [eintrag for eintrag in self.kalender if eintrag[0] == "ALT"]
+                if absenden:
+                    angenommen()
+        finally:
+            A.search, type(dav).change = alt_suche, alt_wechsel
+        return nachricht, vorher
+
+    def test_verlegung_gibt_den_alten_termin_beim_senden_frei(self):
+        nachricht, vorher = self.senden()
+        self.assertEqual(vorher, [])                                   # nicht vor dem Versand
+        self.assertIn(("ALT", "Termin: Erika Beispiel"), self.kalender)
+        text = nachricht.get_body(("plain",)).get_content()
+        self.assertIn("Ihren bisherigen Termin am 04.02.2027 10:15 haben wir wie gewünscht freigegeben.", text)
+        self.assertIn("freigegeben", nachricht.get_body(("html",)).get_content())
+        self.assertEqual(self.hinweise(), ["Verlegung: bisheriger Termin am 04.02.2027 10:15 freigegeben."])
+        with contextlib.closing(A.journal()) as db:
+            slot = json.loads(db.execute("SELECT slot FROM offer").fetchone()["slot"])
+        self.assertNotIn("old", slot)                                  # bei der Bestätigung wird nichts mehr freigegeben
+
+    def test_verlegung_ohne_wahl_laesst_den_alten_termin_stehen(self):
+        nachricht, _ = self.senden(alt="")
+        self.assertNotIn(("ALT", "Termin: Erika Beispiel"), self.kalender)
+        self.assertNotIn("bisherigen Termin", nachricht.get_body(("plain",)).get_content())
+        self.assertEqual(self.hinweise(), [])
+
+    def test_verlegung_unbekannte_wahl_aus_dem_browser_wird_abgelehnt(self):
+        with self.assertRaisesRegex(ValueError, "Bisheriger Termin"):
+            self.senden(alt="erfunden")
+        self.assertEqual(self.kalender, [])
+
+    def test_verlegung_versand_gescheitert_alter_termin_bleibt(self):
+        self.senden(absenden=False)
+        self.assertNotIn(("ALT", "Termin: Erika Beispiel"), self.kalender)
+        self.assertEqual(list(self.stand().values()), ["released"])
+
+    def test_verlegung_freigabe_gescheitert_wird_gemeldet(self):
+        self.freigebbar = False
+        self.senden()
+        self.assertIn("konnte nicht freigegeben werden", self.hinweise()[0])
+
+    def test_verlegung_ohne_bestaetigung_meldet_fehlenden_termin(self):
+        self.senden()
+        A.maintain(self.postfach)
+        self.assertEqual(len(self.hinweise()), 1)                      # Angebot läuft noch
+        with contextlib.closing(A.journal()) as db, db:
+            db.execute("UPDATE offer SET state='released'")
+        A.maintain(self.postfach)
+        A.maintain(self.postfach)
+        self.assertEqual(len(self.hinweise()), 2)                      # genau ein weiterer Hinweis
+        self.assertIn("Verlegung ohne neuen Termin", self.hinweise()[1])
+
+    def test_verlegung_mit_buchung_meldet_nichts_weiter(self):
+        self.senden()
+        with contextlib.closing(A.journal()) as db, db:
+            db.execute("UPDATE offer SET state='booked'")
+        A.maintain(self.postfach)
+        self.assertEqual(len(self.hinweise()), 1)
 
     def test_verlauf_haelt_jeden_statuswechsel_fest(self):
         self.angebot((self.M, 0))
