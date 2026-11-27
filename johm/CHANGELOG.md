@@ -1,6 +1,10 @@
 # Änderungen – Johm Kalender
 
-Neueste Fassung zuerst. Die Nummern J1–J33 verweisen auf die Entscheidungen in `AGENTS.md`.
+Neueste Fassung zuerst. Die Nummern J1–J34 verweisen auf die Entscheidungen in `AGENTS.md`.
+
+## 0.5.2 (2026-11-27)
+
+- **Termine aus dem Chat entfernen** (J34): Kalender-Werkzeug 3.1 mit `termin_entfernen`, Bestätigungsdialog, neuer Aufruf `POST /intern/kalender/entfernen`. Nur offline geprüft.
 
 ## 0.5.1 (2026-11-27)
 

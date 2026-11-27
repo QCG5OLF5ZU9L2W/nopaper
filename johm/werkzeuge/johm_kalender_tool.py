@@ -1,8 +1,8 @@
 """
 title: Praxiskalender (Johm)
 author: Praxis
-version: 3.0
-description: Liest den Nextcloud-Praxiskalender über Johm und trägt nach Bestätigung im Dialog Patientinnen und Patienten in freie Plätze ein.
+version: 3.1
+description: Liest den Nextcloud-Praxiskalender über Johm, trägt nach Bestätigung im Dialog Patientinnen und Patienten in freie Plätze ein und gibt Termine wieder frei.
 """
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -297,3 +297,78 @@ class Tools:
         if problem:
             return f"Nicht eingetragen: {problem}"
         return "Eingetragen: " + done["text"] + ". Der Eintrag steht im Nextcloud-Kalender."
+
+    async def termin_entfernen(
+        self,
+        name: str,
+        datum: str,
+        uhrzeit: str = "",
+        arzt: str = "",
+        __user__: dict = None,
+        __event_call__=None,
+    ) -> str:
+        """
+        Entfernt einen eingetragenen Termin aus dem Praxiskalender und macht den Platz wieder frei (Absage, Storno,
+        austragen, löschen). Vor dem Schreiben erscheint ein Bestätigungsdialog; ohne Bestätigung wird nichts geändert.
+        Die Patientin oder der Patient wird nicht benachrichtigt.
+        :param name: Vor- und Nachname, wie im Termin eingetragen.
+        :param datum: Tag wie gesagt, z. B. "01.07.27" oder "morgen".
+        :param uhrzeit: Uhrzeit, falls genannt, z. B. "10:00". Sonst leer.
+        :param arzt: Name der Ärztin oder des Arztes, falls genannt.
+        """
+        if not self.valves.johm_key:
+            return "Das Kalender-Werkzeug ist nicht eingerichtet: In den Einstellungen des Werkzeugs fehlt der Schlüssel."
+        if __event_call__ is None:
+            return "Entfernen ist hier nicht möglich, weil keine Bestätigung angezeigt werden kann. Bitte im Kalender ändern."
+        today = dt.datetime.now(ZoneInfo(self.valves.zeitzone)).date()
+        try:
+            day = one_day(datum, today)
+            at = clock(uhrzeit) if str(uhrzeit or "").strip() else ""
+        except ValueError as error:
+            return f"{error} Bitte Datum und Uhrzeit genauer angeben."
+        user = __user__ or {}
+        body = {"name": name, "datum": day.isoformat(), "uhrzeit": at, "arzt": arzt}
+
+        def post(data):
+            request = urllib.request.Request(
+                self.valves.johm_url.rstrip("/") + "/intern/kalender/entfernen",
+                data=json.dumps(data).encode(),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Johm-Key": self.valves.johm_key,
+                    "X-Johm-User-Id": str(user.get("id", "")),
+                    "X-Johm-User-Email": str(user.get("email", "")),
+                    "X-Johm-User-Role": str(user.get("role", "")),
+                },
+            )
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=60) as response:
+                return json.load(response)
+
+        async def call(data):
+            try:
+                return await asyncio.to_thread(post, data), None
+            except urllib.error.HTTPError as error:
+                return None, error.read(400).decode("utf-8", "replace")
+            except (OSError, ValueError):
+                return None, "Der Praxiskalender ist nicht erreichbar."
+
+        found, problem = await call(dict(body, schritt="pruefen"))
+        if problem:
+            return f"Nichts geändert: {problem}"
+        if found["status"] == "mehrdeutig":
+            return found["text"] + "\n" + "\n".join(found["optionen"]) + "\nNichts geändert."
+        if found["status"] != "gefunden":
+            return found.get("text", "Kein passender Termin gefunden.") + " Nichts geändert."
+        confirmed = await __event_call__({
+            "type": "confirmation",
+            "data": {"title": "Termin entfernen?",
+                     "message": found["text"] + f"\nDer Platz wird wieder frei ({found['raster']}). Die Patientin oder der Patient wird nicht benachrichtigt."},
+        })
+        if confirmed is not True:
+            return "Abgebrochen. Es wurde nichts geändert."
+        done, problem = await call(dict(body, schritt="entfernen", id=found["id"]))
+        if problem:
+            return f"Nichts geändert: {problem}"
+        return "Entfernt: " + done["text"] + ". Der Platz ist im Nextcloud-Kalender wieder frei."

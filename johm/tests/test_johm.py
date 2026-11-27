@@ -866,10 +866,13 @@ class ChatEintragen(unittest.TestCase):
         import ast
         quelle = (ROOT / "quelle" / "desk.py").read_text(encoding="utf-8")
         baum = ast.parse(quelle)
-        teile = [n for n in baum.body if isinstance(n, ast.FunctionDef) and n.name in ("flat_name", "calendar_enter")]
+        teile = [n for n in baum.body if isinstance(n, ast.FunctionDef) and n.name in ("flat_name", "calendar_enter", "calendar_remove")]
         self.schreiben = []
         test = self
         start = stempel(2027, 1, 14, 13, 0)
+        self.freigebbar = True
+        self.belegt = [("Termin: Erika Beispiel Kontrolle", start + 7200, "A"), ("sTermin: Max Muster", start + 7200, "B"),
+                       ("Termin: Erika Beispielmann", start + 8100, "A"), ("RESERVIERT für Erika Beispiel · bis morgen · Termin:", start + 9000, "A")]
 
         plaetze = [dict(id="p0", title="schwanger:", label="A", start=start - 3600, end=start - 2700, cal="termine_a"),
                    dict(id="p1", title="termin:", label="A", start=start, end=start + 900, cal="termine_a"),
@@ -882,7 +885,13 @@ class ChatEintragen(unittest.TestCase):
 
             def agenda(self, a, b):
                 return [{"title": "Schwanger:" if p["id"] == "p0" else p["title"].capitalize().replace("Stermin", "sTermin"),
-                         "free": True, "start": p["start"]} for p in plaetze]
+                         "free": True, "raster": True, "start": p["start"]} for p in plaetze] + [
+                    dict(title=t, free=False, raster=True, start=st, end=st + 900, calendar=c, path="termine_" + c.lower(), href=f"/{i}.ics")
+                    for i, (t, st, c) in enumerate(test.belegt)]
+
+            def free_entry(self, verweis):
+                test.schreiben.append(("frei", verweis["title"], verweis["start"]))
+                return test.freigebbar
 
             def scan(self, a, b):
                 erlaubt = {t.strip().casefold() for t in self.cfg["free_titles"]}
@@ -894,6 +903,7 @@ class ChatEintragen(unittest.TestCase):
 
         cfg = dict(CFG, mode="live")
         self.ns = {"re": __import__("re"), "time": types.SimpleNamespace(time=lambda: JETZT.timestamp()), "wording": wording,
+                   "hashlib": __import__("hashlib"), "json": json,
                    "web": types.SimpleNamespace(HTTPForbidden=PermissionError),
                    "boxes": types.SimpleNamespace(catalog=lambda: {"1": {"config": {"username": "praxis@example.org"}}}, allowed=lambda u, b: True),
                    "appointments": types.SimpleNamespace(settings=lambda: cfg, client=lambda: Dav(), doctors=A.doctors, doctor_of=A.doctor_of),
@@ -934,6 +944,33 @@ class ChatEintragen(unittest.TestCase):
         self.assertEqual(self.eintragen(uhrzeit="13:00", arzt="Muster")["status"], "belegt")
         with self.assertRaisesRegex(ValueError, "Bekannt sind: Dr. Beispiel, Dr. Muster"):
             self.eintragen(arzt="Dr. Niemand")
+
+    def entfernen(self, **werte):
+        anfrage = dict({"name": "Erika Beispiel", "datum": "2027-01-14"}, **werte)
+        return self.ns["calendar_remove"](anfrage, {"email": "mfa@example.org"})
+
+    def test_entfernen_findet_den_termin_und_gibt_ihn_nach_bestaetigung_frei(self):
+        gefunden = self.entfernen(uhrzeit="15:00")
+        self.assertEqual((gefunden["status"], gefunden["raster"]), ("gefunden", "Termin:"))
+        self.assertIn("15:00–15:15 · Dr. Beispiel · Termin: Erika Beispiel Kontrolle", gefunden["text"])
+        self.assertEqual(self.schreiben, [])
+        fertig = self.entfernen(uhrzeit="15:00", schritt="entfernen", id=gefunden["id"])
+        self.assertEqual(fertig["status"], "entfernt")
+        self.assertEqual(self.schreiben[0][:2], ("frei", "Termin: Erika Beispiel Kontrolle"))
+
+    def test_entfernen_nur_ganze_namen_und_keine_reservierung(self):
+        # "Beispielmann" ist ein anderer Name, die Reservierung eines Angebots wird hier nicht angefasst.
+        self.assertEqual(self.entfernen()["status"], "gefunden")
+        self.assertEqual(self.entfernen(name="Max Muster", arzt="Dr. Beispiel")["status"], "nicht_gefunden")
+        self.assertEqual(self.entfernen(name="Max Muster")["status"], "gefunden")
+
+    def test_entfernen_mit_falscher_kennung_oder_abgelehnt(self):
+        with self.assertRaisesRegex(ValueError, "inzwischen geändert"):
+            self.entfernen(schritt="entfernen", id="falsch")
+        self.freigebbar = False
+        gefunden = self.entfernen()
+        with self.assertRaisesRegex(ValueError, "Freigabe abgelehnt"):
+            self.entfernen(schritt="entfernen", id=gefunden["id"])
 
     def test_vergangenheit_und_name_werden_geprueft(self):
         with self.assertRaisesRegex(ValueError, "Vergangenheit. Gemeint ist vielleicht Do 14.01.2027"):

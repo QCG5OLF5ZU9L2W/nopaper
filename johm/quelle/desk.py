@@ -363,7 +363,7 @@ async def guard(req,handler):
             if len(visible)==1:return web.HTTPFound("/johm/b/"+visible[0]["id"]+"/",headers={"Cache-Control":"no-store"})
             links="".join('<li><a href="/johm/b/'+box["id"]+'/">'+html.escape(box["config"]["sender"])+'</a></li>' for box in visible)
             res=web.Response(content_type="text/html",text='<!doctype html><html lang="de"><meta name="viewport" content="width=device-width"><meta charset="utf-8"><title>JohnMail</title><h1>Postfach auswählen</h1><ul>'+links+'</ul></html>')
-        elif req.path in ("/intern/kalender","/intern/kalender/eintragen"):
+        elif req.path in ("/intern/kalender","/intern/kalender/eintragen","/intern/kalender/entfernen"):
             # Local staff chat only: loopback, never through the reverse proxy, shared key.
             import hmac
             key=(Path(os.environ["CREDENTIALS_DIRECTORY"])/"chat-key").read_text().strip()
@@ -556,6 +556,70 @@ def calendar_enter(p,user):
     return {"status":"belegt","text":f"Um {clock:%H:%M} ist am {days[day.weekday()]} {day:%d.%m.%Y} kein passender Platz frei.",
             "frei_am_tag":others}
 
+def calendar_remove(p,user):
+    """Staff in the local chat give a booked appointment back to its raster. Two steps like entering: find, then free
+    exactly the entry that was found, after the person confirmed it in a dialog. Only if the entry is unchanged."""
+    import datetime as dt
+    from caldav_slots import instant
+    cfg=appointments.settings()
+    enabled=[v.casefold() for v in cfg["mailboxes"]]
+    if not any(boxes.allowed(user,box) and box["config"]["username"].casefold() in enabled for box in boxes.catalog().values()):
+        raise web.HTTPForbidden(text="Dieses Konto hat keinen Kalenderzugriff.")
+    if cfg.get("mode")!="live":raise ValueError("Vorschau aktiv: Entfernen ist ausgeschaltet.")
+    if not isinstance(p,dict):raise ValueError("Ungültige Anfrage.")
+    name=wording.full_name(str(p.get("name","")))
+    if not name:raise ValueError("Bitte Vor- und Nachnamen der Patientin oder des Patienten angeben.")
+    try:
+        day=dt.date.fromisoformat(str(p.get("datum","")))
+        clock=dt.time.fromisoformat(str(p.get("uhrzeit",""))) if p.get("uhrzeit") else None
+    except ValueError:
+        raise ValueError("Datum als JJJJ-MM-TT und Uhrzeit als HH:MM angeben.") from None
+    dav=appointments.client()
+    days=("Mo","Di","Mi","Do","Fr","Sa","So")
+    names=[d["name"] for d in appointments.doctors(cfg)]
+    wanted=flat_name(p.get("arzt",""))
+    chosen=[n for n in names if wanted and (wanted in flat_name(n) or flat_name(n) in wanted)]
+    if wanted and not chosen:raise ValueError("Ärztin oder Arzt nicht gefunden. Bekannt sind: "+", ".join(names)+".")
+    parts=[flat_name(w) for w in name.split()]
+    begin=instant(day,dav.zone)
+    def doctor(r):
+        raster=r["title"].split(":")[0].strip()+":" if ":" in r["title"] else ""
+        return appointments.doctor_of(cfg,raster.casefold(),r["calendar"]) or r["calendar"]
+    def matches(r):
+        if not r["raster"] or r["free"] or ":" not in r["title"]:return False
+        if r["title"].casefold().startswith("reserviert"):return False
+        words={flat_name(w) for w in re.split(r"[\s,;:·]+",r["title"]) if w}
+        if not all(part in words for part in parts):return False
+        if clock and dt.datetime.fromtimestamp(r["start"],dav.zone).time().replace(second=0)!=clock:return False
+        return not chosen or doctor(r) in chosen
+    found=[r for r in dav.agenda(begin,begin+86400) if begin<=r["start"]<begin+86400 and matches(r)]
+    def describe(r):
+        a=dt.datetime.fromtimestamp(r["start"],dav.zone);b=dt.datetime.fromtimestamp(r["end"],dav.zone)
+        return f"{days[a.weekday()]} {a:%d.%m.%Y %H:%M}–{b:%H:%M} · {doctor(r)} · {r['title']}"
+    ident=lambda r:hashlib.sha256(json.dumps([r["path"],r["href"],r["start"],r["title"]]).encode()).hexdigest()[:16]
+    if p.get("schritt")=="entfernen":
+        entry=next((r for r in found if ident(r)==p.get("id")),None)
+        if not entry:raise ValueError("Der Eintrag wurde inzwischen geändert oder entfernt. Bitte neu prüfen.")
+        try:freed=dav.free_entry({"cal":entry["path"],"href":entry["href"],"start":entry["start"],"title":entry["title"]})
+        except Exception:freed=False
+        if not freed:raise ValueError("Der Kalender hat die Freigabe abgelehnt (Serie oder geändert). Bitte im Kalender prüfen.")
+        print("Chat-Entfernen: freigegeben",flush=True)
+        return {"status":"entfernt","text":describe(entry)}
+    if len(found)==1:
+        r=found[0]
+        raster=r["title"].split(":")[0].strip()+":"
+        return {"status":"gefunden","id":ident(r),"text":describe(r),"raster":raster}
+    if found:
+        return {"status":"mehrdeutig","optionen":[describe(r) for r in found],
+                "text":"Mehrere passende Einträge an diesem Tag. Bitte Uhrzeit oder Ärztin bzw. Arzt angeben."}
+    return {"status":"nicht_gefunden","text":f"Am {days[day.weekday()]} {day:%d.%m.%Y}"+(f" um {clock:%H:%M}" if clock else "")+
+            f" gibt es keinen Termin mit dem Namen {name}"+(" bei "+", ".join(chosen) if chosen else "")+"."}
+
+async def chat_remove(req):
+    user={"id":req.headers.get("X-Johm-User-Id",""),"email":req.headers.get("X-Johm-User-Email",""),"role":req.headers.get("X-Johm-User-Role",""),"name":""}
+    if req.content_length is not None and req.content_length>4000:raise ValueError("Anfrage zu groß.")
+    return web.json_response(await asyncio.to_thread(calendar_remove,await req.json(),user))
+
 async def chat_enter(req):
     user={"id":req.headers.get("X-Johm-User-Id",""),"email":req.headers.get("X-Johm-User-Email",""),"role":req.headers.get("X-Johm-User-Role",""),"name":""}
     if req.content_length is not None and req.content_length>4000:raise ValueError("Anfrage zu groß.")
@@ -661,6 +725,7 @@ def make_app():
         app.router.add_get(path,landing)
     app.router.add_get("/intern/kalender",chat_calendar)
     app.router.add_post("/intern/kalender/eintragen",chat_enter)
+    app.router.add_post("/intern/kalender/entfernen",chat_remove)
     for prefix in ("/johm","/johnmail"):
         app.router.add_route("*",prefix+"/b/{boxid}/api/{action}",route)
         app.router.add_get(prefix+"/b/{boxid}/{name:.*}",page)
