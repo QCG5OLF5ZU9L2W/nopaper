@@ -1,6 +1,13 @@
 # Änderungen – Johm Kalender
 
-Neueste Fassung zuerst. Die Nummern J1–J30 verweisen auf die Entscheidungen in `AGENTS.md`.
+Neueste Fassung zuerst. Die Nummern J1–J31 verweisen auf die Entscheidungen in `AGENTS.md`.
+
+## 0.3.0 (2026-11-27)
+
+Auf Anweisung des Verantwortlichen. Nur offline geprüft.
+
+- **Absage als Antwort auf die Buchungsbestätigung** gibt den Termin selbstständig frei, bestätigt der Patientin die Absage und meldet sie der MFA (J31). Verschieben, Rückfragen und Unklares bleiben bei der MFA.
+- **Gebuchte Termine bleiben im Journal bis zum Tag nach dem Termin** statt sieben Tage (J22), mit der Kennung der Bestätigungsmail.
 
 ## 0.2.0 (2026-11-27)
 

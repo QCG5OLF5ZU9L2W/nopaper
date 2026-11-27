@@ -20,7 +20,7 @@ DE = {
  "phone":"Bitte nennen Sie eine Telefonnummer für Rückfragen. Wenn Sie eine Erinnerung per SMS wünschen, geben Sie bitte eine Mobilnummer an und schreiben Sie das dazu.",
  "expire":"Sie erhalten eine Buchungsbestätigung. Nach Ablauf der Frist geben wir unbestätigte Termine wieder frei.",
  "subject":"Rückmeldung zu Ihren Terminen", "hello":"Guten Tag,", "bye":"Freundliche Grüße\nIhr Praxisteam",
- "booked":"Wir bestätigen den Termin für {name} am {when} ({clinic}).", "moved":"Ihr bisheriger Termin am {when} entfällt damit.", "released":"Ihren bisherigen Termin am {when} haben wir wie gewünscht freigegeben.", "missing":"Bitte reichen Sie Ihre Telefonnummer für Rückfragen nach."
+ "booked":"Wir bestätigen den Termin für {name} am {when} ({clinic}).", "moved":"Ihr bisheriger Termin am {when} entfällt damit.", "released":"Ihren bisherigen Termin am {when} haben wir wie gewünscht freigegeben.", "cancelled":"Wir haben Ihren Termin am {when} wie gewünscht abgesagt.", "missing":"Bitte reichen Sie Ihre Telefonnummer für Rückfragen nach."
 }
 EN = {
  "alternatives":"Please choose exactly one appointment per group.",
@@ -38,7 +38,7 @@ EN = {
  "phone":"Please include a phone number where we can reach you. If you would like an SMS reminder, please give us a mobile number and say so.",
  "expire":"We will send you a booking confirmation. Unconfirmed appointments will be released after the deadline.",
  "subject":"Your appointment confirmation", "hello":"Hello,", "bye":"Kind regards,\nYour practice team",
- "booked":"We confirm the appointment for {name} on {when} ({clinic}).", "moved":"Your previous appointment on {when} is hereby cancelled.", "released":"As requested, we have released your previous appointment on {when}.", "missing":"Please send us a phone number where we can reach you."
+ "booked":"We confirm the appointment for {name} on {when} ({clinic}).", "moved":"Your previous appointment on {when} is hereby cancelled.", "released":"As requested, we have released your previous appointment on {when}.", "cancelled":"As requested, we have cancelled your appointment on {when}.", "missing":"Please send us a phone number where we can reach you."
 }
 
 def translated(lang, values):

@@ -266,6 +266,16 @@ class Kalender(unittest.TestCase):
         self.assertEqual(self.dav.reset_cancelled("termine_a", self.href), [])
         self.assertEqual(self.gelesen(), [("Termin: Erika Beispiel", None)])
 
+    def test_absage_der_patientin_nur_wenn_der_eintrag_wie_gebucht_aussieht(self):
+        start = C.instant(dt.datetime(2027, 2, 4, 10, 15), self.dav.zone)
+        slot = {"cal": "termine_a", "href": self.href, "start": start, "end": start + 900, "title": "termin:"}
+        self.eintrag("SUMMARY:Termin: Erika Beispiel", "DTSTART:20270204T101500", "DTEND:20270204T103000",
+                     "DESCRIPTION:Telefon: 030 000000\\nSMS-Erinnerung: ja\\nNotiz der Praxis")
+        self.assertFalse(self.dav.cancel_entry(slot, "Max Muster"))
+        self.assertTrue(self.dav.cancel_entry(slot, "Erika Beispiel"))
+        self.assertEqual(self.gelesen(), [("Termin:", "Notiz der Praxis")])
+        self.assertFalse(self.dav.cancel_entry(slot, "Erika Beispiel"))
+
     def test_alter_termin_wird_nur_unveraendert_freigegeben(self):
         start = C.instant(dt.datetime(2027, 2, 4, 10, 15), self.dav.zone)
         verweis = {"cal": "termine_a", "href": self.href, "start": start, "title": "Termin: Erika Beispiel"}
@@ -327,6 +337,10 @@ class Antworten(unittest.TestCase):
             def change(self, slot, code, action, **werte):
                 test.kalender.append((code, action, werte.get("name"), werte.get("phone"), werte.get("sms")))
 
+            def cancel_entry(self, slot, name):
+                test.kalender.append(("ABSAGE", name))
+                return test.freigebbar
+
             def free_entry(self, verweis):
                 test.kalender.append(("ALT", verweis["title"]))
                 return test.freigebbar
@@ -357,12 +371,14 @@ class Antworten(unittest.TestCase):
         def bestaetigung(cfg, password, recipient, mid, lines, words):
             test.bestaetigungen.append(lines)
             nachricht = EmailMessage()
+            nachricht["Message-ID"] = "<quittung@example.org>"
             nachricht.set_content("x")
             return nachricht
         A.ack = bestaetigung
         A._retry.clear()
+        A._cancel.update(next=0, seen=set())
         with contextlib.closing(A.journal()) as db, db:
-            for tabelle in ("offer", "reply_done", "notice", "moved"):
+            for tabelle in ("offer", "reply_done", "notice", "moved", "receipt"):
                 db.execute("DELETE FROM " + tabelle)
 
     def tearDown(self):
@@ -493,6 +509,88 @@ class Antworten(unittest.TestCase):
         A.maintain(self.postfach)
         self.assertEqual((self.stand(), self.hinweise()), ({self.M: "released"}, []))
         self.assertNotIn(("ALT", "Termin: Erika Beispiel"), self.kalender)
+
+    # --- Absage als Antwort auf die Buchungsbestätigung
+
+    def gebucht_und_absage(self, text="Guten Tag! Ich muss diesen Termin stornieren.", absender="Erika Beispiel <patientin@example.org>",
+                           modell=None, bezug="<quittung@example.org>"):
+        self.angebot((self.M, 0))
+        self.antwort("Ich bestätige den Termin.\n\nVor- und Nachname: Erika Beispiel\nTelefon: 030 23125 117\n", betreff=f"Terminbestätigung [OK {self.M}]")
+        A.maintain(self.postfach)
+        self.assertEqual(self.stand(), {self.M: "booked"})
+        nachricht = EmailMessage(policy=policy.default)
+        nachricht["From"], nachricht["To"], nachricht["Message-ID"], nachricht["In-Reply-To"] = absender, "praxis@example.org", "<absage@example.org>", bezug
+        nachricht.set_content(text + "\n\n> Wir bestätigen den Termin für Erika Beispiel am 11.01.2027 09:00.")
+        roh = nachricht.as_bytes()
+        self.post[2] = {b"INTERNALDATE": dt.datetime.now(), b"RFC822.SIZE": len(roh), b"BODY[]": roh}
+        MODEL["reply"] = modell or {"anliegen": "absagen", "beleg": "Ich muss diesen Termin stornieren."}
+        MODEL["calls"] = 0
+        self.bestaetigungen.clear()
+        A._cancel["next"] = 0
+        A.maintain(self.postfach)
+
+    def test_absage_auf_die_bestaetigung_gibt_den_termin_frei(self):
+        self.gebucht_und_absage()
+        self.assertEqual(self.stand(), {self.M: "cancelled"})
+        self.assertEqual(self.kalender[-1], ("ABSAGE", "Erika Beispiel"))
+        self.assertEqual(self.bestaetigungen, [["Wir haben Ihren Termin am 11.01.2027 09:00 wie gewünscht abgesagt."]])
+        self.assertIn("Absage per Mail: Termin am 11.01.2027 09:00", self.hinweise()[-1])
+        A._cancel["next"] = 0
+        A.maintain(self.postfach)                                      # wird nur einmal bearbeitet
+        self.assertEqual((MODEL["calls"], len(self.bestaetigungen)), (1, 1))
+
+    def test_absage_andere_mitteilung_aendert_nichts(self):
+        self.gebucht_und_absage(text="Vielen Dank, meine Nummer ist 030 000000.", modell={"anliegen": "anderes", "beleg": "Vielen Dank"})
+        self.assertEqual((self.stand(), self.bestaetigungen), ({self.M: "booked"}, []))
+        self.assertNotIn(("ABSAGE", "Erika Beispiel"), self.kalender)
+
+    def test_absage_beleg_steht_nicht_in_der_antwort(self):
+        self.gebucht_und_absage(text="Kann ich auch später kommen?", modell={"anliegen": "absagen", "beleg": "Ich sage den Termin ab"})
+        self.assertEqual(self.stand(), {self.M: "booked"})
+
+    def test_absage_steht_nur_im_zitat(self):
+        self.gebucht_und_absage(text="Danke!\n\n> Ich muss diesen Termin stornieren.")
+        self.assertEqual(self.stand(), {self.M: "booked"})
+
+    def test_absage_von_fremder_adresse_oder_ohne_bezug_wird_uebergangen(self):
+        self.gebucht_und_absage(absender="Fremd <fremd@example.org>")
+        self.assertEqual((self.stand(), MODEL["calls"]), ({self.M: "booked"}, 0))
+
+    def test_absage_ohne_bezug_zur_bestaetigung_wird_uebergangen(self):
+        self.gebucht_und_absage(bezug="<etwas-anderes@example.org>")
+        self.assertEqual((self.stand(), MODEL["calls"]), ({self.M: "booked"}, 0))
+
+    def test_absage_eintrag_geaendert_geht_an_die_mfa(self):
+        self.freigebbar = False
+        self.gebucht_und_absage()
+        self.assertEqual((self.stand(), self.bestaetigungen), ({self.M: "booked"}, []))
+        self.assertIn("konnte nicht freigegeben werden", self.hinweise()[-1])
+
+    def test_absage_modell_nicht_erreichbar_wird_spaeter_gelesen(self):
+        MODEL["fail"] = False
+        self.angebot((self.M, 0))
+        self.antwort("Ich bestätige den Termin.\n\nVor- und Nachname: Erika Beispiel\n", betreff=f"Terminbestätigung [OK {self.M}]")
+        A.maintain(self.postfach)
+        nachricht = EmailMessage(policy=policy.default)
+        nachricht["From"], nachricht["Message-ID"], nachricht["In-Reply-To"] = "Erika Beispiel <patientin@example.org>", "<absage@example.org>", "<quittung@example.org>"
+        nachricht.set_content("Ich sage den Termin ab.")
+        roh = nachricht.as_bytes()
+        self.post[2] = {b"INTERNALDATE": dt.datetime.now(), b"RFC822.SIZE": len(roh), b"BODY[]": roh}
+        MODEL.update(fail=True)
+        A._cancel["next"] = 0
+        A.maintain(self.postfach)
+        self.assertEqual(self.stand(), {self.M: "booked"})
+        MODEL.update(fail=False, reply={"anliegen": "absagen", "beleg": "Ich sage den Termin ab."})
+        A._cancel["next"] = 0
+        A.maintain(self.postfach)
+        self.assertEqual(self.stand(), {self.M: "cancelled"})
+
+    def test_gebuchter_termin_bleibt_bis_zum_termintag_bekannt(self):
+        self.angebot((self.M, 0), (self.T, 1))
+        with contextlib.closing(A.journal()) as db, db:
+            db.execute("UPDATE offer SET created=created-30*86400, state=CASE code WHEN ? THEN 'booked' ELSE 'released' END", (self.M,))
+        A.maintain(self.postfach)
+        self.assertEqual(self.stand(), {self.M: "booked"})
 
     # --- Verlegung: Der bisherige Termin wird beim Senden des Angebots freigegeben.
 

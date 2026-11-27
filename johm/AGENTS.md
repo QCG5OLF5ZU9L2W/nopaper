@@ -37,7 +37,7 @@ Die MFA entscheidet und sendet. Das Modell bereitet vor.
 
 | # | Entscheidung |
 |---|---|
-| J1 | **Die MFA entscheidet und sendet.** Kein Angebot geht ohne ihren Klick hinaus. Selbstständig handelt John nur bei der Bestätigung (J12) und beim Fristablauf. |
+| J1 | **Die MFA entscheidet und sendet.** Kein Angebot geht ohne ihren Klick hinaus. Selbstständig handelt John nur bei der Bestätigung (J12), bei der Absage auf seine Buchungsbestätigung (J31) und beim Fristablauf. |
 | J2 | **Keine Praxisdaten im Code.** Hostnamen, Faxadresse, Nextcloud-Adresse, Postfächer, Kalender, Raster, Terminarten, Ärztinnen und Ärzte stehen in `/etc/nopaper-mail/kalender.json`. Der Dienst liest sie über den systemd-Credential `nc-config`. Die Beispielkonfiguration enthält nur Platzhalter. Das Installationsskript übernimmt `hosts` und `fax_address` einmalig aus einer älteren Installation. |
 | J3 | **Erkennung nach Bedeutung.** Der Leseschritt (`reading.interpret`), der ohnehin für jede geöffnete Mail läuft, meldet das Terminanliegen (`none`, `new`, `change`, `cancel`, `uncertain`). Alles außer einem klaren `none` löst die Terminerkennung aus. Das Stichwortmuster `request_pattern` ist nur das zweite Netz. |
 | J4 | **Schwangerschaft sperrt jeden Vorschlag**, auch bei einer Suche der MFA. Die Vergabe bleibt Handarbeit. Das Merkmal kommt aus der Lesehilfe und zusätzlich aus einer festen Regel für die deutsche Eigenangabe. |
@@ -58,7 +58,7 @@ Die MFA entscheidet und sendet. Das Modell bereitet vor.
 | J19 | **Eine Kontextgröße für alle Modellaufrufe** (32768). Verschiedene Größen ließen Ollama das Modell bei jedem Wechsel neu laden. Die Terminerkennung einer Mail wird 90 Sekunden gemerkt. |
 | J20 | **Wochenansicht:** Wochentage in festen Spalten, vormittags über nachmittags, eine Woche offen, die übrigen eingeklappt mit Anzahl. Oben die dem Wunsch nächsten Plätze, je einer pro Tag. Filter für Ärztin und Tageszeit ohne neue Suche. Bis zu 400 Plätze je Anliegen. |
 | J21 | **Der Kalender bleibt die Wahrheit.** John schreibt nur mit `If-Match` auf den zuvor gelesenen Stand, prüft Reservierungen vor dem Buchen über Code und Fingerabdruck und fällt bei jeder Abweichung auf „manuell prüfen“. Das Journal ist Buchführung, kein zweiter Bestand. |
-| J22 | **Journal:** je Angebot Code, Termin, Anlass, Empfängeradresse, Frist, Status; dazu ein Verlauf jedes Statuswechsels (nur Code und Status, 90 Tage) und Hinweise für die MFA. Angebote werden nach sieben Tagen gelöscht. Bereits angebotene Plätze werden derselben Adresse nicht erneut vorgeschlagen. |
+| J22 | **Journal:** je Angebot Code, Termin, Anlass, Empfängeradresse, Frist, Status; dazu ein Verlauf jedes Statuswechsels (nur Code und Status, 90 Tage) und Hinweise für die MFA. Angebote werden nach sieben Tagen gelöscht; ein gebuchter Termin bleibt samt Kennung seiner Bestätigungsmail bis zum Tag nach dem Termin bekannt, damit eine Absage zugeordnet werden kann (J31). Bereits angebotene Plätze werden derselben Adresse nicht erneut vorgeschlagen. |
 | J23 | **Kalender-Werkzeug für den Chat:** nur lesend (`/intern/kalender`), nur vom Rechner selbst, nicht über den Reverse-Proxy, mit Schlüssel, nur für Konten mit freigeschaltetem Postfach. Es zeigt auf Wunsch auch belegte Termine mit Namen – das Modell läuft lokal. |
 | J24 | **Feste Texte in fremden Sprachen** übersetzt das Modell nach Schema. Ist die Übersetzung nach zwei Versuchen unbrauchbar, gelten die englischen Texte, und das Terminfeld sagt es. |
 | J25 | **Fehlermeldungen nennen die Ursache** (Modell oder Kalender). Protokolle enthalten nur die Art des Fehlers, nie Mailtext, Namen oder Termine. |
@@ -67,6 +67,7 @@ Die MFA entscheidet und sendet. Das Modell bereitet vor.
 | J28 | **Bisherigen Termin finden.** Mit Datum in der Mail: vergebene Plätze dieses Tages (und der Uhrzeit, falls genannt), abgeglichen mit dem Namen aus dem Absender und einem in der Mail genannten Namen. Ohne Datum, oder wenn am genannten Tag nichts passt: die Kalender von heute bis sechs Monate voraus, in drei Abfragen. **Vorgewählt** wird nur ein eindeutiger Treffer: mit Datum ein einziger Eintrag mit dem Namen, ohne Datum ein einziger Eintrag mit zwei Namensteilen (Vor- und Nachname). Ein einzelner Namensteil ist nur ein Hinweis und wird nie vorgewählt; mehr als acht solche Treffer werden nicht angezeigt. Namensteile zählen nur als ganze Wörter. Das Ergebnis wird je Mail zwei Minuten gemerkt. |
 | J29 | **Farben aus Nextcloud.** Jeder vorgeschlagene Platz trägt in der Wochenansicht die Farbe seines Kalendereintrags (`COLOR`), sonst die Farbe seines Kalenders (zehn Minuten gemerkt). Die Farbe ist nur Anzeige: Sie gehört nicht zur Kennung eines Platzes, und ein Fehler beim Lesen der Kalenderfarbe hält die Suche nicht auf. Weitergegeben werden nur `#hex` oder ein einfacher Farbname; gesetzt wird sie im Browser als Stileigenschaft, nie als Markup. |
 | J30 | **Akut in der Akut-Farbe.** Erkennt John ein dringendes Anliegen (J17), bekommt der Hinweis oben die Farbe, die die Akut-Raster im Kalender haben; die Akutplätze tragen sie ohnehin (J29). Die Farbe wird gelesen, nicht konfiguriert. Ist im Suchzeitraum kein Akut-Raster frei, bleibt der Hinweis in der Standardfarbe. |
+| J31 | **Absage als Antwort auf die Buchungsbestätigung wird selbstständig bearbeitet** (Auftrag vom 2026-11-27; zweite Ausnahme von J1 neben J12). Bedingungen, alle im Code geprüft: Die Mail bezieht sich im Kopf auf Johns Buchungsbestätigung (`In-Reply-To`/`References`), kommt von der Adresse, an die das Angebot ging, ist keine automatische Antwort, und der Termin liegt in der Zukunft. Das Modell liest nur den eigenen Text der Antwort (ohne Zitat) und muss „absagen“ mit einem wörtlichen Beleg daraus liefern; verschieben, Rückfragen, bedingte oder unklare Absagen bleiben gewöhnliche Post für die MFA. Freigegeben wird nur der Termin genau dieser Bestätigung und nur, wenn der Kalendereintrag noch so aussieht, wie John ihn gebucht hat (Raster, Name, Zeit); Telefon- und SMS-Vermerk entfallen dabei. Die Patientin bekommt eine kurze Bestätigung, die MFA einen Hinweis. Enthält die Bestätigung mehrere Termine oder wurde der Eintrag geändert: nur Hinweis an die MFA. Jede Antwort wird einmal gelesen; ist das Modell nicht erreichbar, später erneut. Geprüft wird höchstens alle zwei Minuten, in der Post der letzten drei Tage. Gilt nur für Buchungen ab dieser Fassung. |
 
 ## 4. Aufbau
 
@@ -109,7 +110,7 @@ Durch Rückmeldung des Verantwortlichen am 2026-11-26/27:
 - Verlegung: Wunsch und bisheriger Termin werden gelesen.
 
 Alles Übrige ist nur offline geprüft, insbesondere: Abgleich der Absagen (J10), Freigabe des alten
-Termins beim Senden und die Suche danach (J9, J28), Farben (J29, J30), Buchung über Mail-Link und freie Antwort (J12), Dringlichkeit (J17), Wochenansicht im
+Termins beim Senden und die Suche danach (J9, J28), Farben (J29, J30), Absage per Mail (J31), Buchung über Mail-Link und freie Antwort (J12), Dringlichkeit (J17), Wochenansicht im
 Betrieb (J20), das Chat-Werkzeug (J23), die Migration der Konfiguration (J2).
 
 ## 7. Offene Punkte
@@ -128,4 +129,4 @@ Betrieb (J20), das Chat-Werkzeug (J23), die Migration der Konfiguration (J2).
 
 ## 8. Für den nächsten Build
 
-Derzeit nichts offen. Die Aufträge vom 2026-11-27 sind mit 0.2.0 gebaut (J9, J28–J30).
+Vorgeschlagen, nicht beauftragt: eine nachgereichte Telefonnummer als Antwort auf die Buchungsbestätigung in den gebuchten Termin eintragen. Die Aufträge vom 2026-11-27 sind mit 0.2.0 und 0.3.0 gebaut (J9, J28–J31).

@@ -195,6 +195,23 @@ class DAV:
             self.request("PUT",url,cal.to_ical(),{"If-Match":tag,"Content-Type":"text/calendar; charset=utf-8"})
             return True
         return False
+    def cancel_entry(self,slot,name):
+        """The patient cancels an appointment John booked: back to its raster, only if the entry still looks as it was booked."""
+        url=self.url(slot["cal"],slot["href"])
+        raw,headers=self.request("GET",url)
+        tag=headers.get("ETag","")
+        if not tag.startswith('"'):return False
+        cal=Calendar.from_ical(raw)
+        expected=norm(slot["title"]+" "+name)
+        for ev in cal.walk("VEVENT"):
+            if any(k in ev for k in ("RRULE","RDATE")) or ev.get("X-JOHM-CODE"):continue
+            if interval(ev,self.zone)!=(slot["start"],slot["end"]) or norm(ev.get("SUMMARY",""))!=expected:continue
+            raster=re.match(r"\s*([^\s:]{1,12}:)",str(ev.get("SUMMARY","")))
+            if not raster:return False
+            self.clear_entry(ev,raster.group(1))
+            self.request("PUT",url,cal.to_ical(),{"If-Match":tag,"Content-Type":"text/calendar; charset=utf-8"})
+            return True
+        return False
     def reset_cancelled(self,name,href):
         """Staff wrote the word Absage into a title: reset that entry to its free raster title. Never touches a whole series."""
         url=self.url(name,href)
