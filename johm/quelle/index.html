@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mail-Entwürfe · John</title><link rel="stylesheet" href="style.css"><script src="app.js?v=terminwunsch-18" defer></script></head>
+<body><header><strong>John</strong><span>Mail-Entwürfe</span><a href="/johm/">Postfächer</a><a href="/">Zum Chat</a></header>
+<p id="status" role="status" aria-live="polite"><!--mail-status--></p>
+<p id="boot-note">Falls sich keine Mail öffnen lässt, <a href="./">Ansicht neu laden</a>.</p>
+<pre id="alerts" aria-live="polite"></pre><main><aside><div class="bar"><h1>Postfach</h1><button id="refresh">Aktualisieren</button></div><nav id="list" aria-label="Mail-Entwürfe"><!--mail-rows--></nav></aside>
+<section id="work" hidden><h2 id="subject"></h2><p id="address"></p>
+<div id="pregflag" role="status" hidden></div>
+<section id="translation" aria-live="polite" hidden><h3>Deutsche Übersetzung</h3><pre id="translated"></pre></section>
+<details open><summary>Originalmail</summary><pre id="original"></pre></details>
+<details open hidden id="faxpanel"><summary>PDF-Anhänge · Text und OCR</summary><pre id="faxtext"></pre></details>
+<section id="calendar" hidden><h3>Passende Termine</h3><p id="calstatus" role="status"></p>
+<div id="wishes"></div><details id="more"><summary>Suchzeitraum ändern</summary><label>Tage ab heute <input id="caldays" type="number" min="1"></label> <button id="calsearch" type="button">Erneut suchen</button></details>
+</section><label for="draft">Antwortentwurf</label><textarea id="draft" rows="9" maxlength="8000"></textarea>
+<pre id="offerpreview" hidden></pre><div class="bar"><button id="save">Entwurf übernehmen</button><button id="send">Jetzt senden</button></div>
+<section id="comparison" hidden><h3>Aktueller Stand in Mailcow</h3><pre id="latest"></pre><button id="adopt">Diesen Mailcow-Stand laden</button></section><h3>Mit John besprechen</h3><div id="history"></div><label for="question">Frage oder Stichpunkte der MFA</label>
+<textarea id="question" placeholder="Enter sendet die Frage · Umschalt+Enter neue Zeile · Strg+Enter schlägt eine Antwort vor · erledigt + Enter legt die Mail ab" rows="3" maxlength="2500"></textarea>
+<div class="actions"><button id="ask">Frage beantworten</button><button id="revise">Entwurf überarbeiten</button></div>
+</section></main></body></html>

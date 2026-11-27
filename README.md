@@ -452,6 +452,10 @@ python3 -I tests/test_nopaper.py
 - Der API-Benutzer in paperless hat keine Admin- und keine Löschrechte.
 - Tests, Beispiele und Fehlerberichte dürfen keine echten Belege enthalten.
 
+## Mailarbeitsplatz und Kalender
+
+Im Verzeichnis [`johm/`](johm/README.md) liegt die Kalender-Erweiterung des Mailarbeitsplatzes: Terminanliegen in der Eingangspost erkennen, freie Plätze aus einem Nextcloud-Kalender vorschlagen, reservieren und buchen. In Erprobung; die Basis des Mailarbeitsplatzes ist noch nicht Teil dieses Repositorys.
+
 ## Lizenz
 
 GNU Affero General Public License, Version 3 oder später (`AGPL-3.0-or-later`). Siehe `LICENSE`.

@@ -3,3 +3,5 @@ __pycache__/
 nopaper-installer.sh
 *.soll.json
 *.pdf
+johm/johm-kalender-install.sh
+johm-testmails.html
