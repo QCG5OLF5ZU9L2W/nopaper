@@ -431,6 +431,13 @@ async def route(req):
     else:raise web.HTTPNotFound()
     return web.json_response(value)
 
+def flat_name(value):
+    """Doctor names compared without title, dots, case or umlaut spelling."""
+    value=str(value).casefold()
+    for a,b in (("ä","ae"),("ö","oe"),("ü","ue"),("ß","ss")):value=value.replace(a,b)
+    value=re.sub(r"\b(?:dr|med|prof|frau|herr|fr|hr)\b\.?","",value)
+    return re.sub(r"[^a-z0-9]","",value)
+
 def calendar_overview(query,user):
     """Read-only calendar listing for the local chat tool."""
     import datetime as dt
@@ -444,18 +451,30 @@ def calendar_overview(query,user):
     except ValueError:
         raise ValueError("Datum als JJJJ-MM-TT angeben.") from None
     if not 0<=(last-first).days<=31:raise ValueError("Zeitraum höchstens 31 Tage, bis nicht vor von.")
+    names=[d["name"] for d in appointments.doctors(cfg)]
+    wanted=flat_name(query.get("arzt",""))
+    chosen=None
+    if wanted:
+        chosen=[n for n in names if wanted in flat_name(n) or flat_name(n) in wanted]
+        if not chosen:raise ValueError("Ärztin oder Arzt nicht gefunden. Bekannt sind: "+", ".join(names)+".")
     dav=appointments.client()
     rows=dav.agenda(instant(first,dav.zone),instant(last+dt.timedelta(days=1),dav.zone))
     kind=query.get("art","").strip().rstrip(":").casefold()
     days=("Mo","Di","Mi","Do","Fr","Sa","So")
-    lines=[]
+    lines=[];out=[]
     for r in rows:
         if query.get("frei")=="1" and not r["free"]:continue
         if kind and r["title"].split(":")[0].strip().casefold() not in (kind,"s"+kind):continue
         a=dt.datetime.fromtimestamp(r["start"],dav.zone);b=dt.datetime.fromtimestamp(r["end"],dav.zone)
-        doctor=appointments.doctor_of(cfg,r["title"].split(":")[0].strip().casefold()+":" if ":" in r["title"] else "",r["calendar"])
-        lines.append(f"{days[a.weekday()]} {a:%d.%m.%Y %H:%M}–{b:%H:%M} · {doctor or r['calendar']} · {r['title'] or '(ohne Titel)'} · {'frei' if r['free'] else 'belegt'}")
-    return {"count":len(lines),"truncated":len(lines)>400,"entries":lines[:400]}
+        raster=r["title"].split(":")[0].strip()+":" if ":" in r["title"] else ""
+        doctor=appointments.doctor_of(cfg,raster.casefold(),r["calendar"]) or r["calendar"]
+        if chosen is not None and doctor not in chosen:continue
+        lines.append(f"{days[a.weekday()]} {a:%d.%m.%Y %H:%M}–{b:%H:%M} · {doctor} · {r['title'] or '(ohne Titel)'} · {'frei' if r['free'] else 'belegt'}")
+        out.append({"day":f"{days[a.weekday()]} {a:%d.%m.%Y}","time":f"{a:%H:%M}","minutes":(r["end"]-r["start"])//60,"doctor":doctor,
+                    "raster":raster,"title":r["title"],"free":r["free"]})
+    today=dt.datetime.now(dav.zone).date()
+    return {"count":len(lines),"truncated":len(lines)>400,"entries":lines[:400],"rows":out[:600],"doctors":chosen or names,
+            "today":f"{days[today.weekday()]} {today:%d.%m.%Y}"}
 
 async def chat_calendar(req):
     user={"id":req.headers.get("X-Johm-User-Id",""),"email":req.headers.get("X-Johm-User-Email",""),"role":req.headers.get("X-Johm-User-Role",""),"name":""}

@@ -803,5 +803,49 @@ class Weiterleiten(unittest.TestCase):
         text = BytesParser(policy=policy.default).parsebytes(self.gesendet[0][2]).get_body(("plain",)).get_content()
         self.assertTrue(text.startswith("---------- Weitergeleitete Nachricht"))
 
+
+class ChatWerkzeug(unittest.TestCase):
+    """Zeitangaben im Kalender-Werkzeug für Open WebUI."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        if "pydantic" not in sys.modules:
+            try:
+                import pydantic  # noqa: F401
+            except ImportError:
+                sys.modules["pydantic"] = types.SimpleNamespace(BaseModel=object, Field=lambda default=None, **kw: default)
+        spec = importlib.util.spec_from_file_location("johm_kalender_tool", ROOT / "werkzeuge" / "johm_kalender_tool.py")
+        cls.W = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.W)
+
+    def zeit(self, von, bis=""):
+        a, b = self.W.period(von, bis, dt.date(2026, 11, 27))  # Freitag
+        return a.isoformat(), b.isoformat()
+
+    def test_wochen(self):
+        self.assertEqual(self.zeit("übernächste Woche"), ("2026-12-07", "2026-12-13"))
+        self.assertEqual(self.zeit("in der übernächsten Woche"), ("2026-12-07", "2026-12-13"))
+        self.assertEqual(self.zeit("nächste Woche"), ("2026-11-30", "2026-12-06"))
+        self.assertEqual(self.zeit("diese Woche"), ("2026-11-27", "2026-11-29"))
+        self.assertEqual(self.zeit("in 3 Wochen"), ("2026-12-14", "2026-12-20"))
+        self.assertEqual(self.zeit("KW 2"), ("2027-01-11", "2027-01-17"))
+        self.assertEqual(self.zeit("KW 50"), ("2026-12-07", "2026-12-13"))
+
+    def test_tage_und_daten(self):
+        self.assertEqual(self.zeit("morgen"), ("2026-11-28", "2026-12-04"))
+        self.assertEqual(self.zeit("Montag", "Montag"), ("2026-11-30", "2026-11-30"))
+        self.assertEqual(self.zeit("15.01.", "22.01."), ("2027-01-15", "2027-01-22"))
+        self.assertEqual(self.zeit("2026-12-01", "2026-12-03"), ("2026-12-01", "2026-12-03"))
+        self.assertEqual(self.zeit(""), ("2026-11-27", "2026-12-03"))
+        self.assertEqual(self.zeit("nächsten Monat"), ("2026-12-01", "2026-12-31"))
+
+    def test_grenzen(self):
+        self.assertEqual(self.zeit("2026-12-01", "2027-03-01")[1], "2027-01-01")
+        with self.assertRaises(ValueError):
+            self.zeit("irgendwann")
+        with self.assertRaises(ValueError):
+            self.zeit("2026-12-10", "2026-12-01")
+
 if __name__ == "__main__":
     unittest.main()

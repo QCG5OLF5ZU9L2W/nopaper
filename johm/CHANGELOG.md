@@ -2,6 +2,10 @@
 
 Neueste Fassung zuerst. Die Nummern J1–J32 verweisen auf die Entscheidungen in `AGENTS.md`.
 
+## 0.4.1 (2026-11-27)
+
+- **Kalender-Werkzeug für Open WebUI 2.0** (J23): Filter nach Ärztin oder Arzt, Zeitangaben wie „übernächste Woche“ werden im Werkzeug umgerechnet, kompakte Ausgabe je Tag. Der Mailarbeitsplatz liefert dafür strukturierte Zeilen und das heutige Datum. Nicht an einem echten Open WebUI erprobt.
+
 ## 0.4.0 (2026-11-27)
 
 Auf Anweisung des Verantwortlichen. Offline und mit nachgestellter Oberfläche geprüft.
