@@ -122,3 +122,12 @@ Betrieb (J20), das Chat-Werkzeug (J23), die Migration der Konfiguration (J2).
 9. **Suche über das Postfach für den Chat** (Wortsuche über IMAP, später semantisch): nur entworfen. Ein Index mit Mailinhalten bräche mit dem Grundsatz, nichts davon auf die Platte zu schreiben.
 10. **Chat-Werkzeug bei Open WebUI im Container:** `127.0.0.1` ist dann nicht der Rechner; Adresse und Prüfung wären anzupassen.
 11. **Mehrere Postfächer mit Kalender:** Abgleich der Absagen und Journal sind je Postfach getrennt; ein Angebot aus Postfach A kennt der Abgleich von Postfach B nicht.
+
+## 8. Für den nächsten Build
+
+Vom Verantwortlichen am 2026-11-27 aufgetragen, noch nicht gebaut.
+
+1. **Verlegung: bisherigen Termin sofort freigeben** (ändert J9). Grund: Sonst sind bis zur Bestätigung zwei Plätze für dieselbe Patientin blockiert. Vorgesehen: Freigabe in dem Moment, in dem die MFA das Angebot mit den neuen Plätzen sendet (J1), nicht schon beim Eingang der Mail. Die Bedingungen aus J9 bleiben (Name im Titel, Eintrag unverändert). Das Angebot muss der Patientin sagen, dass der bisherige Termin damit aufgehoben ist. **Zu klären:** was geschieht, wenn sie keinen der neuen Plätze bestätigt – sie hat dann keinen Termin mehr; mindestens ein Hinweis an die MFA bei Fristablauf.
+2. **Farben aus Nextcloud in der Wochenansicht.** Jeder vorgeschlagene Platz erscheint in der Farbe seines Kalendereintrags (`COLOR` des Termins, sonst Farbe des Kalenders).
+3. **Akut in der Akut-Farbe.** Erkennt John ein dringendes Anliegen (J17), werden Hinweis und Akutplätze in der Farbe dargestellt, die die Akut-Raster in Nextcloud haben. Die Farbe wird gelesen, nicht in der Konfiguration festgelegt.
+4. **Installationsskript:** Die Meldung `curl: (7) Failed to connect` des ersten, zu frühen Versuchs der Startprüfung unterdrücken.
