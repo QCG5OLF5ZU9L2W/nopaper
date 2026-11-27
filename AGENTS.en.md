@@ -380,3 +380,5 @@ The directory `johm/` holds the calendar extension of the mail desk `nopaper-mai
 - Tests: `python3 johm/tests/test_johm.py`
 
 Sections 2 and 9 of this file apply there as well. Unlike section 11, the mail desk uses libraries from the distribution's packages (`aiohttp`, `imapclient`, `icalendar`). The base `nopaper-mail` itself is not in this repository yet.
+
+The telephone counterpart **johv** (John answering calls on FreePBX) is designed, not built: `johv/AGENTS.md` (German).

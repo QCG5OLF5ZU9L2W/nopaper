@@ -431,3 +431,5 @@ Im Verzeichnis `johm/` liegt die Kalender-Erweiterung des Mailarbeitsplatzes `no
 - Tests: `python3 johm/tests/test_johm.py`
 
 Die Abschnitte 2 und 9 dieser Datei gelten dort ebenso. Abweichend von Abschnitt 11 nutzt der Mailarbeitsplatz Bibliotheken aus den Paketen der Distribution (`aiohttp`, `imapclient`, `icalendar`). Die Basis `nopaper-mail` selbst liegt noch nicht in diesem Repository.
+
+Das Telefon-Gegenstück **johv** (John am Telefon an FreePBX) ist entworfen, nicht gebaut: `johv/AGENTS.md`.
