@@ -40,7 +40,7 @@ class Tools:
         Liest den Terminkalender der Praxis aus Nextcloud. Für jede Frage nach freien oder belegten Praxisterminen dieses Werkzeug verwenden und keinen anderen Kalender.
         :param von: Erster Tag als JJJJ-MM-TT.
         :param bis: Letzter Tag als JJJJ-MM-TT, höchstens 31 Tage nach von.
-        :param art: Kürzel des Terminrasters, wie es im Kalender steht, zum Beispiel Schw für Schwangere oder KV. Leer lassen für alle Arten. Die Variante mit vorangestelltem s (sSchw, sKV) wird mit gefunden.
+        :param art: Kürzel des Terminrasters, wie es im Kalender steht, so wie es im Titel vor dem Doppelpunkt steht. Leer lassen für alle Arten. Eine Variante mit vorangestelltem s wird mit gefunden.
         :param nur_frei: true zeigt nur freie Plätze. false zeigt auch belegte Termine mit ihren Einträgen.
         """
         if not self.valves.johm_key:

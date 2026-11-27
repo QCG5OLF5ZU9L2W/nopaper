@@ -217,7 +217,7 @@ class DAV:
                         blocked.append((a,b))
                     rows.append(dict(start=a,end=b,title=title,calendar=entry["label"],raster=not entry.get("blocks_only"),path=name,href=row.findtext(D+"href")))
         for r in rows:
-            # Free means: an untouched raster entry such as "KV:" that no block note covers.
+            # Free means: an untouched raster entry such as "Termin:" that no block note covers.
             r["free"]=bool(r["raster"] and re.fullmatch(r"[^\s:]{1,12}:",r["title"]) and not self.closed(r["start"]) and not any(r["start"]<b and a<r["end"] for a,b in blocked))
         return sorted(rows,key=lambda r:(r["start"],r["calendar"]))
     def held_available(self,slot,code,expected):

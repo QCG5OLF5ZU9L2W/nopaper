@@ -44,7 +44,7 @@ C=[
 (R,"Deutsch",None,"Im Angebot auf „Diesen Termin per E-Mail bestätigen“ klicken und die vorbereitete Mail unverändert senden.","Gebucht ohne Modell · Name aus der Vorbelegung · Bestätigung bittet um Telefonnummer"),
 (R,"Deutsch",None,"Im Angebot auf „Keiner dieser Termine passt“ klicken, hinter „Besser passen würde mir:“ ergänzen: freitags ab 13 Uhr","Beide Reservierungen freigegeben · neue Vorschläge freitags ab 13:00"),
 (R,"Deutsch",None,"Von einer anderen Mailadresse antworten: Ja, der erste Termin passt.","Keine Buchung · Reservierung bleibt bis zur Frist bestehen"),
-(R,"Deutsch",None,"Gar nicht antworten und die Frist ablaufen lassen.","Reservierung nach Fristablauf freigegeben · Kalendereintrag heißt wieder „KV:“ bzw. „sKV:“"),
+(R,"Deutsch",None,"Gar nicht antworten und die Frist ablaufen lassen.","Reservierung nach Fristablauf freigegeben · Kalendereintrag trägt wieder seinen Rastertitel"),
 ]
 
 data=[{"nr":i,"area":a,"lang":l,"subject":s,"body":b,"expect":e} for i,(a,l,s,b,e) in enumerate(C,1)]
