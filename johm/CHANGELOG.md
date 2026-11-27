@@ -1,6 +1,12 @@
 # Änderungen – Johm Kalender
 
-Neueste Fassung zuerst. Die Nummern J1–J31 verweisen auf die Entscheidungen in `AGENTS.md`.
+Neueste Fassung zuerst. Die Nummern J1–J32 verweisen auf die Entscheidungen in `AGENTS.md`.
+
+## 0.4.0 (2026-11-27)
+
+Auf Anweisung des Verantwortlichen. Offline und mit nachgestellter Oberfläche geprüft.
+
+- **Weiterleiten im Mailarbeitsplatz** an beliebige Adressen, mit der Originalmail samt Anhängen (J32). Neuer optionaler Konfigurationsschlüssel `forward_recipients` für Empfänger als Knöpfe.
 
 ## 0.3.0 (2026-11-27)
 

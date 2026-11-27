@@ -24,13 +24,22 @@
   "doctors": [
     {
       "name": "Dr. Beispiel",
-      "rasters": ["Termin:", "Akut:"],
-      "calendars": ["A"]
+      "rasters": [
+        "Termin:",
+        "Akut:"
+      ],
+      "calendars": [
+        "A"
+      ]
     },
     {
       "name": "Dr. Muster",
-      "rasters": ["sTermin:"],
-      "calendars": ["B"]
+      "rasters": [
+        "sTermin:"
+      ],
+      "calendars": [
+        "B"
+      ]
     }
   ],
   "global_blocks": [
@@ -68,5 +77,15 @@
   "reply_folders": [
     "INBOX",
     "Erledigt"
+  ],
+  "forward_recipients": [
+    {
+      "name": "Dr. Muster",
+      "address": "muster@example.org"
+    },
+    {
+      "name": "Labor",
+      "address": "labor@example.net"
+    }
   ]
 }

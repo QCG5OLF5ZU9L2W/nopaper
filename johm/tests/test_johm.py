@@ -59,7 +59,7 @@ sys.modules["boxes"] = types.SimpleNamespace(
     current=types.SimpleNamespace(get=lambda: {"config": {"username": "praxis@example.org"}}))
 sys.modules["mail"] = types.SimpleNamespace(
     HTTP=types.SimpleNamespace(open=modell), API="http://modell.invalid", MODEL="test",
-    FAX_ADDRESS="fax@example.org", mailbody=lambda message: message.get_content())
+    FAX_ADDRESS="fax@example.org", mailbody=lambda message: (message.get_body(("plain",)) or message).get_content())
 sys.modules["outbound"] = types.SimpleNamespace(special=lambda *args: "Gesendet")
 import appointments as A  # noqa: E402
 import caldav_slots as C  # noqa: E402
@@ -681,6 +681,127 @@ class Antworten(unittest.TestCase):
             verlauf = [(zeile["was"], zeile["now"]) for zeile in db.execute("SELECT was,now FROM history WHERE code=? ORDER BY rowid", (self.M,))]
         self.assertEqual(verlauf[-3:], [("sent", "confirming"), ("confirming", "ack_pending"), ("ack_pending", "booked")])
 
+
+
+class Weiterleiten(unittest.TestCase):
+    """Weiterleiten der Originalmail an beliebige Adressen, mit nachgestelltem Postfach und SMTP."""
+
+    def setUp(self):
+        import importlib.util
+        sys.modules["review"] = types.SimpleNamespace(state=lambda: TMP, account=lambda cfg, valid: "praxis@example.org/" + str(valid))
+        spec = importlib.util.spec_from_file_location("outbound_echt", ROOT / "quelle" / "outbound.py")
+        self.O = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.O)
+        self.gesendet, self.abgelegt, self.markiert = [], [], []
+        self.ablehnen = set()
+        test = self
+        original = EmailMessage(policy=policy.default)
+        original["From"], original["To"], original["Subject"] = "Erika Beispiel <patientin@example.org>", "praxis@example.org", "Befund für Größe"
+        original["Date"] = "Fri, 27 Nov 2026 08:00:00 +0100"
+        original.set_content("Guten Tag, anbei mein Befund. Grüße")
+        original.add_attachment(b"%PDF-1.4 erfunden", maintype="application", subtype="pdf", filename="befund.pdf")
+        self.roh = original.as_bytes()
+
+        class Postfach:
+            def select_folder(self, name, readonly=True):
+                return {b"UIDVALIDITY": 7}
+
+            def fetch(self, uids, teile):
+                if "BODY.PEEK[]" in teile:
+                    return {5: {b"BODY[]": test.roh}}
+                return {5: {b"RFC822.SIZE": len(test.roh), b"FLAGS": ()}}
+
+            def list_folders(self):
+                return [((b"\\Sent",), b"/", "Gesendet"), ((), b"/", "INBOX")]
+
+            def append(self, ordner, roh, flags=()):
+                test.abgelegt.append((ordner, roh))
+
+            def add_flags(self, uids, flags, silent=False):
+                test.markiert.append((uids, flags))
+
+        class SMTP:
+            def __init__(self, *args, **kw):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def close(self):
+                pass
+
+            def starttls(self, **kw):
+                pass
+
+            def login(self, *args):
+                pass
+
+            def sendmail(self, absender, an, roh):
+                test.gesendet.append((absender, list(an), roh))
+                return {a: (550, b"nein") for a in an if a in test.ablehnen}
+
+        self.O.smtplib = types.SimpleNamespace(SMTP=SMTP, SMTPAuthenticationError=OSError, SMTPRecipientsRefused=KeyError,
+                                               SMTPResponseException=LookupError, SMTPNotSupportedError=LookupError)
+        self.postfach = Postfach()
+        with contextlib.closing(self.O.forward_journal()) as db, db:
+            db.execute("DELETE FROM forwarded")
+
+    def tearDown(self):
+        sys.modules.pop("review", None)
+
+    def weiter(self, an, notiz="Bitte ansehen.", revision="r1"):
+        ctx = {"revision": "r1", "source": "7-5"}
+        return self.O.forward(self.postfach, {"sender": "praxis@example.org", "host": "mail.example.org", "username": "praxis@example.org"},
+                              "Entwürfe", "r-7-5", revision, an, notiz, "geheim", None, lambda *a: (None, ctx), RuntimeError)
+
+    def test_weiterleiten_an_beliebige_adressen_mit_originalmail(self):
+        antwort = self.weiter("Dr. Muster <muster@praxis-beispiel.de>; labor@labor-beispiel.de")
+        self.assertIn("An 2 Empfänger weitergeleitet", antwort["notice"])
+        absender, an, roh = self.gesendet[0]
+        self.assertEqual(an, ["muster@praxis-beispiel.de", "labor@labor-beispiel.de"])
+        from email.parser import BytesParser
+        mail = BytesParser(policy=policy.default).parsebytes(roh)
+        self.assertEqual(mail["Subject"], "WG: Befund für Größe")
+        text = mail.get_body(("plain",)).get_content()
+        self.assertTrue(text.startswith("Bitte ansehen."))
+        self.assertIn("Von: Erika Beispiel <patientin@example.org>", text)
+        self.assertIn("anbei mein Befund", text)
+        innen = [teil for teil in mail.iter_attachments() if teil.get_content_type() == "message/rfc822"][0].get_content()
+        self.assertEqual([a.get_filename() for a in innen.iter_attachments()], ["befund.pdf"])
+        self.assertEqual(self.abgelegt[0][0], "Gesendet")
+        self.assertEqual(self.markiert, [([5], [b"$Forwarded"])])
+
+    def test_gleiche_empfaenger_nur_einmal_andere_ja(self):
+        self.weiter("labor@labor-beispiel.de")
+        with self.assertRaisesRegex(RuntimeError, "bereits weitergeleitet"):
+            self.weiter("LABOR@labor-beispiel.de")
+        self.weiter("muster@praxis-beispiel.de")
+        self.assertEqual(len(self.gesendet), 2)
+
+    def test_ungueltige_adressen_und_faxgateway_werden_abgelehnt(self):
+        for falsch in ("", "labor", "labor@beispiel", "a@b.de\r\nBcc: x@y.de", "fax@example.org", ",".join(f"a{i}@b.de" for i in range(6))):
+            with self.assertRaises(ValueError):
+                self.weiter(falsch)
+        self.assertEqual(self.gesendet, [])
+
+    def test_veraenderte_mail_wird_nicht_weitergeleitet(self):
+        with self.assertRaisesRegex(RuntimeError, "geändert"):
+            self.weiter("labor@labor-beispiel.de", revision="alt")
+        self.assertEqual(self.gesendet, [])
+
+    def test_teilweise_abgelehnt_wird_gemeldet(self):
+        self.ablehnen = {"labor@labor-beispiel.de"}
+        antwort = self.weiter("muster@praxis-beispiel.de, labor@labor-beispiel.de")
+        self.assertIn("An 1 Empfänger weitergeleitet, 1 abgelehnt", antwort["notice"])
+
+    def test_ohne_notiz(self):
+        self.weiter("labor@labor-beispiel.de", notiz="")
+        from email.parser import BytesParser
+        text = BytesParser(policy=policy.default).parsebytes(self.gesendet[0][2]).get_body(("plain",)).get_content()
+        self.assertTrue(text.startswith("---------- Weitergeleitete Nachricht"))
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,7 @@ Sie muss vor dem zweiten Lauf ausgefüllt werden.
 | `extra_holidays` | Zusätzliche freie Tage, `JJJJ-MM-TT` oder jährlich `MM-TT`. |
 | `request_pattern` | Stichwörter als zweites Netz der Erkennung. |
 | `reply_folders` | Ordner, in denen Antworten auf Angebote gesucht werden. |
+| `forward_recipients` | Optional: Empfänger, die beim Weiterleiten als Knöpfe erscheinen, je `name` und `address`. Andere Adressen können trotzdem eingegeben werden. |
 | `model`, `model_api` | Optional: Modellname und Adresse von Ollama. |
 
 Die Lesemerkmale (Schwangerschaft, Dringlichkeit usw.) stehen in `/etc/nopaper-mail/lesehilfe.json`

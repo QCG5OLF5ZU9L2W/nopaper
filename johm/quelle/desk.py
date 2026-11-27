@@ -232,6 +232,20 @@ def send_reply(item, revision, text, picks=None):
         return outbound.submit(c,cfg,folder,item,revision,text,credential("password").rstrip("\r\n"),
                                context,review_context,Conflict,picks)
 
+def forward_mail(item,revision,to,note):
+    with mailbox() as (c,cfg,folder), (review.state()/"worker.lock").open("a") as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        return outbound.forward(c,cfg,folder,item,revision,to,note,credential("password").rstrip("\r\n"),
+                                context,review_context,Conflict)
+
+def forward_book():
+    """Recipients offered as buttons for forwarding, from the site configuration. Any other address can be typed."""
+    book=[]
+    for entry in SITE.get("forward_recipients",[]) if isinstance(SITE.get("forward_recipients"),list) else []:
+        if isinstance(entry,dict) and isinstance(entry.get("address"),str) and outbound.ADDRESS.fullmatch(entry["address"].strip()):
+            book.append({"name":str(entry.get("name") or entry["address"])[:60],"address":entry["address"].strip()})
+    return book[:20]
+
 def new_version(item,revision,text,action_id):
     try:
         action=str(uuid.UUID(action_id))
@@ -382,12 +396,13 @@ async def route(req):
     action=req.match_info.get("action")
     if action=="list" and req.method=="GET": value=await asyncio.to_thread(list_mail)
     elif action=="calendar-status" and req.method=="GET":value=await asyncio.to_thread(appointments.pending)
-    elif action in ("open","chat","save","send","finish","appointments","reading") and req.method=="POST":
+    elif action in ("open","chat","save","send","forward","finish","appointments","reading") and req.method=="POST":
         p=await req.json()
         item=p["id"]
         if action=="open":
             value=await asyncio.to_thread(read_item,item)
             value["calendarEnabled"]=appointments.enabled()
+            value["forwardBook"]=forward_book()
             value["mentions"]=reading.mentions(value)
         elif action in ("appointments","reading"):
             if action=="appointments" and not appointments.enabled():raise web.HTTPForbidden()
@@ -398,6 +413,11 @@ async def route(req):
                 return reading.analyse(ctx) if action=="reading" else appointments.search(ctx,p.get("days"),p.get("override"))
             value=await asyncio.to_thread(candidates)
         elif action=="chat":value=await asyncio.to_thread(discuss,item,p)
+        elif action=="forward":
+            note=p.get("note","")
+            if not isinstance(note,str) or len(note)>4000:raise ValueError("Notiz zu lang.")
+            async with write_lock():
+                value=await asyncio.to_thread(forward_mail,item,p.get("revision"),bounded(p.get("to"),2000),note)
         elif action=="finish":
             async with write_lock():
                 value=await asyncio.to_thread(finish_item,item,p.get("revision"))

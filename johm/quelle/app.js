@@ -11,7 +11,8 @@ function reset(){
   item=null; thread=[]; dirty=false; saveKey=null;
   el("work").hidden=true;
   for(const id of ["subject","address","original","history"]) el(id).replaceChildren();
-  for(const id of ["draft","question"]) el(id).value="";
+  for(const id of ["draft","question","fwdto","fwdnote"]) el(id).value="";
+  el("forwardpanel").hidden=true;el("fwdbook").replaceChildren();
 }
 async function api(action,body){
   const options={cache:"no-store"};
@@ -66,6 +67,7 @@ function bindRow(b,row){
       el("revise").textContent=row.kind==="review"?"Antwort vorschlagen":"Entwurf überarbeiten";
       el("save").textContent=row.kind==="review"?"Ersten Entwurf speichern":"Entwurf übernehmen";
       el("draft").value=data.draft;el("work").hidden=false;
+      fillForwardBook(data.forwardBook||[]);
       loadReading(item);
       for(const x of el("list").children)x.setAttribute("aria-current",String(x===b));
       notice("");
@@ -178,6 +180,33 @@ el("send").onclick=()=>task(async()=>{
   notice(result.notice);
   try{await loadList();notice(result.notice);}catch{notice(result.notice+" Liste bitte aktualisieren.");}
 });
+// Forwarding: any address can be typed, configured recipients are one click away.
+function addresses(text){return text.split(/[,;\n]/).map(part=>{const m=part.match(/<([^<>]+)>/);return (m?m[1]:part).trim();}).filter(Boolean);}
+function fillForwardBook(book){
+  const row=el("fwdbook");row.replaceChildren();
+  for(const entry of book){
+    const b=document.createElement("button");b.type="button";b.textContent=entry.name;b.title=entry.address;
+    b.onclick=()=>{const list=addresses(el("fwdto").value);
+      if(!list.some(a=>a.toLowerCase()===entry.address.toLowerCase()))list.push(entry.address);
+      el("fwdto").value=list.join(", ");};
+    row.append(b);
+  }
+  row.hidden=!book.length;
+}
+el("forward").onclick=()=>{if(!item)return;el("forwardpanel").hidden=!el("forwardpanel").hidden;if(!el("forwardpanel").hidden)el("fwdto").focus();};
+el("fwdcancel").onclick=()=>{el("forwardpanel").hidden=true;};
+el("fwdsend").onclick=()=>task(async()=>{
+  if(!item)return;
+  const list=addresses(el("fwdto").value);
+  if(!list.length){notice("Bitte mindestens eine Empfängeradresse eingeben.");el("fwdto").focus();return;}
+  const known=new Set((item.forwardBook||[]).map(e=>e.address.toLowerCase()));
+  const lines=list.map(a=>"• "+a+(known.has(a.toLowerCase())?"":"   ← bitte Schreibweise prüfen"));
+  if(!confirm("Originalmail mit allen Anhängen weiterleiten an:\n\n"+lines.join("\n")+"\n\nBetreff: "+item.subject))return;
+  const result=await api("forward",{id:item.id,revision:item.revision,to:list.join(", "),note:el("fwdnote").value});
+  el("forwardpanel").hidden=true;el("fwdto").value="";el("fwdnote").value="";
+  notice(result.notice);
+});
+el("fwdto").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();el("fwdsend").click();}};
 el("adopt").onclick=()=>{
   if(!current||!canLeave())return;
   item={...current,draftSubject:item.draftSubject};el("draft").value=item.draft;dirty=false;saveKey=null;thread=[];renderThread();
