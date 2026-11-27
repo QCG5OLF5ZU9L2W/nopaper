@@ -129,4 +129,11 @@ Betrieb (J20), das Chat-Werkzeug (J23), die Migration der Konfiguration (J2).
 
 ## 8. Für den nächsten Build
 
-Vorgeschlagen, nicht beauftragt: eine nachgereichte Telefonnummer als Antwort auf die Buchungsbestätigung in den gebuchten Termin eintragen. Die Aufträge vom 2026-11-27 sind mit 0.2.0 und 0.3.0 gebaut (J9, J28–J31).
+Die Aufträge vom 2026-11-27 sind mit 0.2.0 und 0.3.0 gebaut (J9, J28–J31). Offen:
+
+1. **SMS-Erinnerung über einen eigenen LTE-Router** (Auftrag vom 2026-11-27). Vorhandenes Gerät: Teltonika RUT955 mit SIM-Karte im Praxisnetz. Bisher ist „SMS-Erinnerung: ja“ nur ein Vermerk im Termin; John verschickt keine SMS.
+   - **Weg:** John spricht den Router direkt im lokalen Netz an, kein SMS-Dienst im Internet, kein weiterer Auftragsverarbeiter. Verschlüsselt, mit hinterlegtem Zertifikat des Routers, Prüfung nie abgeschaltet. Zugangsdaten in einer eigenen Datei unter `/etc/nopaper-mail`, als systemd-Credential geladen, nie in der Konfiguration oder im Protokoll.
+   - **Schnittstelle hängt von der Firmware ab:** bis 6.x der Post/Get-Aufruf `cgi-bin/sms_send` (Kennwort in der Adresse – nur wenn nichts anderes geht); ab 7.x Anmeldung über `/api/login` mit Token und Versand über `/api/messages/actions/send` mit Modem-Kennung. Der Post/Get-Weg entfällt bei Teltonika ab 7.14.
+   - **Vorschlag, noch zu bestätigen:** Erinnerung am Vortag um 10 Uhr, für Montage am Freitag; für jeden Termin mit „SMS-Erinnerung: ja“ und einer Mobilnummer in der Beschreibung, gleich ob von John oder der MFA eingetragen; Text nur mit Datum, Uhrzeit und Praxisname (aus der Konfiguration), kein Anlass, kein Arztname; je Termin genau einmal, im Journal vermerkt; Hinweis an die MFA, wenn eine SMS nicht hinausging; Antworten per SMS vorerst nicht ausgewertet, der Text verweist für Absagen auf Mail oder Telefon.
+   - **Vor dem Bauen zu klären:** Firmware-Version des Routers; seine Adresse und ob `llm` ihn erreicht (Netzfreigabe des Dienstes); ob die SIM-Karte SMS versenden darf; Zeitpunkt und Text der Erinnerung; ob SMS-Antworten ausgewertet werden sollen. Eine nachgereichte Mobilnummer (Punkt 2) ist Voraussetzung für viele Erinnerungen.
+2. **Nachgereichte Telefonnummer** (vorgeschlagen, nicht beauftragt): Antwort auf die Buchungsbestätigung mit Telefonnummer und SMS-Wunsch in den gebuchten Termin eintragen, wie in J31 nur mit Bezug im Mailkopf, von der Adresse des Angebots und mit der Nummer wörtlich in der Mail.
