@@ -454,6 +454,10 @@ python3 -I tests/test_nopaper.py
 - The API user in paperless has neither admin nor delete permissions.
 - Tests, examples and bug reports must not contain real documents.
 
+## Mail desk and calendar
+
+The directory [`johm/`](johm/README.md) holds the calendar extension of the mail desk: it recognises appointment requests in incoming mail, proposes free slots from a Nextcloud calendar, holds and books them. Being trialled; the base of the mail desk is not part of this repository yet. Its documentation is in German.
+
 ## Licence
 
 GNU Affero General Public License, version 3 or later (`AGPL-3.0-or-later`). See `LICENSE`.

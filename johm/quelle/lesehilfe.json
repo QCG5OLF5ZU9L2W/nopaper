@@ -1,0 +1,65 @@
+{
+  "signals": [
+    {
+      "id": "pregnancy",
+      "label": "Schwangerschaft",
+      "meaning": "Eigene aktuelle Schwangerschaft oder selbst berichteter positiver Schwangerschaftstest.",
+      "terms": [
+        "schwanger",
+        "Schwangerschaftstest",
+        "pregnant",
+        "pregnancy",
+        "grossesse",
+        "enceinte",
+        "embarazada",
+        "embarazo",
+        "ciąża",
+        "ciąży",
+        "hamileyim",
+        "gebelik",
+        "беременна",
+        "вагітна",
+        "حامل",
+        "妊娠",
+        "怀孕",
+        "गर्भवती"
+      ]
+    },
+    {
+      "id": "bleeding",
+      "label": "Blutung",
+      "meaning": "Die schreibende Person berichtet eine aktuelle Blutung.",
+      "terms": [
+        "Blutung",
+        "bleeding",
+        "saignement",
+        "sangrado",
+        "krwawienie",
+        "kanama",
+        "кровотечение",
+        "نزيف",
+        "出血"
+      ]
+    },
+    {
+      "id": "urgent",
+      "label": "Dringend",
+      "meaning": "Die schreibende Person schildert für sich selbst aktuelle Beschwerden oder eine Lage, die eine baldige ärztliche Behandlung nahelegt, zum Beispiel starke oder zunehmende Schmerzen, Fieber oder den Verdacht auf eine Entzündung, oder sie bittet ausdrücklich um einen dringenden Termin oder Akuttermin. Vorsorge, Routine und Terminwünsche ohne Beschwerden gehören nicht dazu.",
+      "terms": [
+        "dringend",
+        "akut",
+        "Notfall",
+        "starke Schmerzen",
+        "Fieber",
+        "urgent",
+        "emergency",
+        "severe pain",
+        "acil",
+        "срочно",
+        "терміново",
+        "pilne",
+        "عاجل"
+      ]
+    }
+  ]
+}

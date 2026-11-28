@@ -370,3 +370,17 @@ Result: NuExtract in image mode is on a par with qwen, and probably better with 
 | `bin/` | `nopaper` (CLI wrapper), `nopaper-aktivieren`, `nopaper-mandant`, `nopaper-modell-laden` |
 | `systemd/` | `nopaper.service` (default instance), `nopaper@.service` (tenants) |
 | `tests/test_nopaper.py` | offline tests with fake paperless/Ollama |
+
+## 14. Mail desk and calendar (`johm/`)
+
+The directory `johm/` holds the calendar extension of the mail desk `nopaper-mail`: it recognises appointment requests in incoming mail, proposes slots from a Nextcloud calendar, holds them and books after confirmation. It is a project of its own with its own decisions (J1 ff.), changelog and tests:
+
+- Decisions and open points: `johm/AGENTS.md` (German)
+- Changes: `johm/CHANGELOG.md` (German)
+- Tests: `python3 johm/tests/test_johm.py`
+
+Sections 2 and 9 of this file apply there as well. Unlike section 11, the mail desk uses libraries from the distribution's packages (`aiohttp`, `imapclient`, `icalendar`). The base `nopaper-mail` itself is not in this repository yet.
+
+The telephone counterpart **johv** (John answering calls on FreePBX) is designed, not built: `johv/AGENTS.md` (German).
+
+Further tasks a local language model could take on in the practice, with principles and a proposed order: `VORHABEN.md` (German; nothing there is decided).

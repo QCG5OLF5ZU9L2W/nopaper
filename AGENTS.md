@@ -421,3 +421,17 @@ Ergebnis: NuExtract im Bild-Modus ist gleichauf mit qwen, mit den Korrekturen au
 | `lib/nopaper/testlauf.py` | Testlauf **ohne paperless** (`nopaper test`): Ergebnisse je Modell unter `/srv/nopaper/test/ergebnis`, nur mit Musterbelegen |
 | `lib/nopaper/main.py` | CLI: `run`, `once`, `check`, `status`, `nachbearbeiten <id>`, `test`, `paperless-skript` |
 | `tests/test_nopaper.py` | Offline-Tests mit Fake-paperless/Ollama |
+
+## 14. Mailarbeitsplatz und Kalender (`johm/`)
+
+Im Verzeichnis `johm/` liegt die Kalender-Erweiterung des Mailarbeitsplatzes `nopaper-mail`: Terminanliegen in der Eingangspost erkennen, Plätze aus einem Nextcloud-Kalender vorschlagen, reservieren und nach Bestätigung buchen. Sie ist ein eigenes Vorhaben mit eigenen Entscheidungen (J1 ff.), eigenem Changelog und eigenen Tests:
+
+- Entscheidungen und offene Punkte: `johm/AGENTS.md`
+- Änderungen: `johm/CHANGELOG.md`
+- Tests: `python3 johm/tests/test_johm.py`
+
+Die Abschnitte 2 und 9 dieser Datei gelten dort ebenso. Abweichend von Abschnitt 11 nutzt der Mailarbeitsplatz Bibliotheken aus den Paketen der Distribution (`aiohttp`, `imapclient`, `icalendar`). Die Basis `nopaper-mail` selbst liegt noch nicht in diesem Repository.
+
+Das Telefon-Gegenstück **johv** (John am Telefon an FreePBX) ist entworfen, nicht gebaut: `johv/AGENTS.md`.
+
+Was ein lokales Sprachmodell in der Praxis darüber hinaus übernehmen könnte, mit Grundsätzen und vorgeschlagener Reihenfolge: `VORHABEN.md` (nichts davon entschieden).
