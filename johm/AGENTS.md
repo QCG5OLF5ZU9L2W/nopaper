@@ -89,6 +89,7 @@ Die MFA entscheidet und sendet. Das Modell bereitet vor.
 | `werkzeuge/installer-bauen.sh` | baut `johm-kalender-install.sh` |
 | `werkzeuge/johm_kalender_tool.py` | Werkzeug für Open WebUI: lesen (J23), eintragen (J33), entfernen (J34) |
 | `werkzeuge/testmails-bauen.py` | Seite mit 37 erfundenen Testmails |
+| `werkzeuge/serien-aufloesen.py` | Einmal-Werkzeug: Serien eines Nextcloud-Kalenders in einen neuen Kalender mit Einzelterminen auflösen; leeren Jahreskalender aus einer Vorlagewoche anlegen (`--neues-jahr`). Der alte Kalender wird nur gelesen. Gegen nachgestellten Server getestet. |
 | `tests/test_johm.py` | Offline-Tests; `tests/fake/icalendar.py` ersetzt die Bibliothek nur im Test |
 
 ## 5. Arbeitsweise
@@ -141,3 +142,4 @@ Die Aufträge vom 2026-11-27 sind mit 0.2.0 und 0.3.0 gebaut (J9, J28–J31). Of
    - **Vor dem Bauen zu klären:** Firmware-Version des Routers; seine Adresse und ob `llm` ihn erreicht (Netzfreigabe des Dienstes); ob die SIM-Karte SMS versenden darf; Zeitpunkt und Text der Erinnerung; ob SMS-Antworten ausgewertet werden sollen. Eine nachgereichte Mobilnummer (Punkt 2) ist Voraussetzung für viele Erinnerungen.
 2. **Nachgereichte Telefonnummer** (vorgeschlagen, nicht beauftragt): Antwort auf die Buchungsbestätigung mit Telefonnummer und SMS-Wunsch in den gebuchten Termin eintragen, wie in J31 nur mit Bezug im Mailkopf, von der Adresse des Angebots und mit der Nummer wörtlich in der Mail.
 3. **John am Telefon (johv)** – eigenes Vorhaben, Entscheidungen und Entwurf in `johv/AGENTS.md`. Nichts gebaut.
+4. **Weitere Vorhaben** (Rückrufliste, Befunde vorsortieren, Rezeptwünsche, Website u. a.): `VORHABEN.md` im Wurzelverzeichnis.

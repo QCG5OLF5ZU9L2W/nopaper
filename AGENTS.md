@@ -433,3 +433,5 @@ Im Verzeichnis `johm/` liegt die Kalender-Erweiterung des Mailarbeitsplatzes `no
 Die Abschnitte 2 und 9 dieser Datei gelten dort ebenso. Abweichend von Abschnitt 11 nutzt der Mailarbeitsplatz Bibliotheken aus den Paketen der Distribution (`aiohttp`, `imapclient`, `icalendar`). Die Basis `nopaper-mail` selbst liegt noch nicht in diesem Repository.
 
 Das Telefon-Gegenstück **johv** (John am Telefon an FreePBX) ist entworfen, nicht gebaut: `johv/AGENTS.md`.
+
+Was ein lokales Sprachmodell in der Praxis darüber hinaus übernehmen könnte, mit Grundsätzen und vorgeschlagener Reihenfolge: `VORHABEN.md` (nichts davon entschieden).
